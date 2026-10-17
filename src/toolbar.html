@@ -497,7 +497,8 @@
     pointer-events: none;
     overflow: hidden;
   }
-  #fx > div { position: absolute; transition: opacity 900ms var(--anim-smooth); }
+  #fx > div { position: absolute; }
+  :root { --amb-ease: cubic-bezier(0.37, 0, 0.18, 1); }
 
   /* Theme gradient: accent washes from the corners, drifting very slowly. */
   #fx-gradient {
@@ -508,6 +509,7 @@
       radial-gradient(38% 50% at 82% 12%, color-mix(in srgb, var(--accent-secondary) 26%, transparent), transparent 70%),
       radial-gradient(50% 60% at 50% 95%, color-mix(in srgb, var(--accent-color) 16%, transparent), transparent 75%);
     animation: fx-drift 48s ease-in-out infinite alternate;
+    transition: opacity 900ms var(--anim-smooth);
   }
   @keyframes fx-drift {
     0%   { transform: translate3d(-3%, -2%, 0) rotate(0deg) scale(1); }
@@ -517,11 +519,44 @@
 
   /* Ambient glow: page colors as large soft blobs hugging the page edge, cross-fading
      (registered colors interpolate) and wandering slowly. */
-  #fx-ambient {
+  /* A new page's colors arrive one glow after another (staggered, slow ease-in-out). */
+  #fx > #fx-ambient {
     inset: 0;
     opacity: var(--fx-ambient);
-    transition: opacity 900ms var(--anim-smooth), --amb1 3.2s var(--anim-smooth),
-                --amb2 3.6s var(--anim-smooth), --amb3 4s var(--anim-smooth), --amb4 4.4s var(--anim-smooth);
+    transition: opacity 900ms var(--anim-smooth),
+                --amb1 2.6s var(--amb-ease),
+                --amb2 3.2s var(--amb-ease) 0.25s,
+                --amb3 3.6s var(--amb-ease) 0.5s,
+                --amb4 4.2s var(--amb-ease) 0.75s;
+  }
+  #fx > #fx-ambient.live {
+    transition: opacity 900ms var(--anim-smooth), --amb1 1.4s linear, --amb2 1.4s linear,
+                --amb3 1.4s linear, --amb4 1.4s linear;
+  }
+  /* …while each glow blooms (swells, brightens, then settles) and a soft wave of the new
+     color washes across the chrome. `scale` composes with the drift's `transform`. */
+  #fx-ambient.shift .b1 { animation: amb-a 34s ease-in-out infinite alternate, amb-bloom 2.8s var(--amb-ease) 0s 1; }
+  #fx-ambient.shift .b2 { animation: amb-b 41s ease-in-out infinite alternate, amb-bloom 3.1s var(--amb-ease) 0.2s 1 backwards; }
+  #fx-ambient.shift .b3 { animation: amb-c 47s ease-in-out infinite alternate, amb-bloom 3.1s var(--amb-ease) 0.4s 1 backwards; }
+  #fx-ambient.shift .b4 { animation: amb-d 53s ease-in-out infinite alternate, amb-bloom 3.4s var(--amb-ease) 0.6s 1 backwards; }
+  @keyframes amb-bloom {
+    0%   { scale: 1; filter: blur(28px); }
+    38%  { scale: 1.22; filter: blur(40px) saturate(1.4) brightness(1.15); }
+    100% { scale: 1; filter: blur(28px); }
+  }
+  #fx-wash {
+    position: absolute;
+    inset: -20% -50%;
+    background: radial-gradient(28% 90% at 50% 10%, var(--wash, transparent), transparent 70%);
+    filter: blur(24px);
+    opacity: 0;
+    pointer-events: none;
+  }
+  #fx-ambient.shift #fx-wash { animation: amb-wash 2.6s var(--amb-ease) 1; }
+  @keyframes amb-wash {
+    0%   { opacity: 0; transform: translateX(-38%); }
+    35%  { opacity: 0.6; }
+    100% { opacity: 0; transform: translateX(38%); }
   }
   #fx-ambient .blob {
     position: absolute;
@@ -545,6 +580,7 @@
   /* Grain, like Zen: static fractal noise blended into whatever is under it. */
   #fx-noise {
     inset: 0;
+    transition: opacity 900ms var(--anim-smooth);
     opacity: calc(var(--fx-noise) * 0.6);
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -639,6 +675,29 @@
   body.flyout.open #tabs { opacity: 1; }
   body.flyout.open.closing #tabs { opacity: 0; }
 
+  /* ── One continuous chrome around the page ──
+     The toolbar row and the vertical tab sidebar form a single L-shaped surface: same
+     background, no borders between them (they used to meet in a hard step with a stray line at
+     the top-left). The page is set apart by a soft shadow drawn just outside its edges instead. */
+  body.vertical:not(.flyout) #tabs { border-top: 0; border-right: 0; background: var(--bg-color); }
+  body.fx.vertical:not(.flyout) #tabs { background: transparent; }
+  body.fx.vertical.autohide:not(.flyout) #tabs { background: color-mix(in srgb, var(--sidebar-bg) 70%, transparent); }
+  body.fx.vertical.autohide:not(.flyout) #tabs:hover { background: var(--accent-color); }
+  #page-edge {
+    position: fixed;
+    left: var(--content-left, 0px);
+    top: var(--content-top, 82px);
+    right: 0;
+    bottom: 0;
+    z-index: 3;
+    pointer-events: none;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-color) 70%, transparent),
+                0 2px 6px color-mix(in srgb, var(--shadow-color) 60%, transparent),
+                0 10px 32px color-mix(in srgb, var(--shadow-color) 45%, transparent);
+    transition: left 380ms var(--anim-bezier), top 380ms var(--anim-bezier);
+  }
+  body.flyout #page-edge { display: none; }
+
   /* Address bar: a soft accent glow when focused. */
   #field.focus {
     box-shadow: 0 0 0 2px var(--accent-ring),
@@ -652,9 +711,10 @@
 <body>
   <div id="fx" aria-hidden="true">
     <div id="fx-gradient"></div>
-    <div id="fx-ambient"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span></div>
+    <div id="fx-ambient"><div id="fx-wash"></div><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span></div>
     <div id="fx-noise"></div>
   </div>
+  <div id="page-edge" aria-hidden="true"></div>
   <div class="grip" id="grip-n"></div>
   <div class="grip" id="grip-nw"></div>
   <div class="grip" id="grip-ne"></div>
@@ -756,12 +816,42 @@
     post({ cmd: e.detail === 2 ? "toggle_maximize" : "drag_window" });
   });
 
+  // History suggestions: the list is drawn by a separate overlay webview (this one sits behind
+  // the page); we only track the matches and the keyboard selection.
+  let suggestions = [], suggestSel = -1, typed = "";
+  const hideSuggest = () => { suggestions = []; suggestSel = -1; post({ cmd: "suggest_hide" }); };
+  const pickSuggest = (n) => {
+    suggestSel = n;
+    addr.value = n >= 0 ? suggestions[n].url : typed;
+    post({ cmd: "suggest_sel", sel: n });
+  };
+  addr.addEventListener("input", () => {
+    typed = addr.value;
+    suggestSel = -1;
+    if (!typed.trim()) { hideSuggest(); return; }
+    const r = field.getBoundingClientRect();
+    post({ cmd: "suggest", text: typed, x: r.left, w: r.width });
+  });
   addr.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { post({ cmd: "navigate", input: addr.value }); addr.blur(); }
-    if (e.key === "Escape") { addr.blur(); post({ cmd: "focus_page" }); }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && suggestions.length) {
+      e.preventDefault();
+      const n = suggestions.length;
+      pickSuggest(e.key === "ArrowDown" ? (suggestSel + 1 >= n ? -1 : suggestSel + 1) : (suggestSel < 0 ? n - 1 : suggestSel - 1));
+      return;
+    }
+    if (e.key === "Enter") { post({ cmd: "navigate", input: addr.value }); hideSuggest(); addr.blur(); }
+    if (e.key === "Escape") {
+      if (suggestions.length) { addr.value = typed; hideSuggest(); return; }
+      addr.blur(); post({ cmd: "focus_page" });
+    }
   });
   addr.addEventListener("focus", () => { field.classList.add("focus"); addr.value = currentUrl; addr.select(); });
-  addr.addEventListener("blur", () => { field.classList.remove("focus"); addr.value = pretty(currentUrl); });
+  addr.addEventListener("blur", () => {
+    field.classList.remove("focus");
+    addr.value = pretty(currentUrl);
+    // Delayed: a click on the dropdown moves focus before its own mousedown is handled.
+    setTimeout(() => { if (document.activeElement !== addr) hideSuggest(); }, 150);
+  });
   tabsEl.addEventListener("wheel", (e) => { if (!vertical) tabsEl.scrollLeft += e.deltaY; }, { passive: true });
 
   // ── Tabs: updated in place (keyed by id) so open / close / switch can animate ──
@@ -865,11 +955,26 @@
     ambientSig = sig;
     const rgb = (c, alpha) => (c ? `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})` : "transparent");
     const pick = (i) => colors[i] || colors[0];
-    const amb = $("fx-ambient").style;
+    const ambEl = $("fx-ambient");
+    const amb = ambEl.style;
     amb.setProperty("--amb1", rgb(pick(0), 0.85));
     amb.setProperty("--amb2", rgb(pick(1), 0.7));
     amb.setProperty("--amb3", rgb(pick(2), 0.7));
     amb.setProperty("--amb4", rgb(pick(3), 0.6));
+    // Colors changing every second or two (video, animations) follow quickly and quietly; the
+    // bloom + wash is for a new page, so it isn't replayed within a few seconds of the last one.
+    const t = performance.now();
+    ambEl.classList.toggle("live", t - (applyFx.lastChange || 0) < 4000);
+    applyFx.lastChange = t;
+    if (colors.length && a > 0 && t - (applyFx.lastShift || 0) > 6000) {
+      applyFx.lastShift = t;
+      amb.setProperty("--wash", rgb(colors[0], 0.9));
+      ambEl.classList.remove("shift");
+      void ambEl.offsetWidth; // restart the one-shot animations
+      ambEl.classList.add("shift");
+      clearTimeout(applyFx.shiftTimer);
+      applyFx.shiftTimer = setTimeout(() => ambEl.classList.remove("shift"), 4200);
+    }
   }
 
   function renderTabs(tabs) {
@@ -923,6 +1028,9 @@
       document.body.classList.toggle("collapsed", !flyout && !!L.collapsed);
       document.body.classList.toggle("no-anim", L.animations === false);
       applyFx(s.fx, s.ambient);
+      // Where the page sits (matches content_rect in main.rs), for the shadow around it.
+      fxRoot.setProperty("--content-left", (vertical && !flyout ? (L.sidebar || 0) : 0) + "px");
+      fxRoot.setProperty("--content-top", (vertical ? 48 : 82) + "px");
 
       renderTabs(s.tabs);
       const active = s.tabs.find((t) => t.active);
@@ -963,6 +1071,7 @@
       }
     },
     focusAddress() { addr.focus(); addr.select(); },
+    suggestions(list) { if (document.activeElement === addr) { suggestions = list; suggestSel = -1; } },
     peek() {
       clearTimeout(closeTimer);
       document.body.classList.remove("closing");

@@ -10,6 +10,7 @@
 
 mod adblock_filter;
 mod extensions;
+mod history;
 mod settings;
 
 use adblock_filter::SharedEngine;
@@ -27,10 +28,12 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::platform::windows::WindowBuilderExtWindows;
 use tao::window::{ResizeDirection, Window, WindowBuilder};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
-use webview2_com::{AcceleratorKeyPressedEventHandler, ClearBrowsingDataCompletedHandler, FocusChangedEventHandler, TrySuspendCompletedHandler};
+use webview2_com::{AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ClearBrowsingDataCompletedHandler, FocusChangedEventHandler, TrySuspendCompletedHandler};
 use windows::core::{BOOL, Interface};
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM};
+use windows::Win32::System::Com::{IStream, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET};
 use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_F5, VK_LEFT, VK_MENU, VK_RIGHT, VK_SHIFT,
     VK_TAB,
@@ -47,6 +50,10 @@ use wry::{
 
 /// Height of the toolbar + tab strip (logical px); must match `toolbar.html`.
 const TOOLBAR_H: f64 = 82.0;
+/// Address bar suggestion rows (logical px); must match suggest.html.
+const SUGGEST_ROW_H: f64 = 36.0;
+const SUGGEST_PAD: f64 = 18.0;
+const SUGGEST_MAX: usize = 6;
 /// Height of the toolbar row alone; extension popovers open just below it, Safari-style.
 const TOOLBAR_ROW_H: f64 = 48.0;
 /// Vertical tab sidebar widths (logical px); must match toolbar.html.
@@ -129,6 +136,10 @@ pub enum UserEvent {
     PageTone(u32, bool),
     /// A tab's page colors were sampled for the ambient glow.
     PageAmbient(u32, Vec<[u8; 3]>),
+    /// Capturing a tab for the ambient glow failed: sample its CSS colors instead.
+    AmbientFallback(u32),
+    /// Re-sample the active page, so playing video / animated images keep the glow in step.
+    AmbientTick,
     /// chickenwm.conf changed (theme / per-app modes may have).
     ThemeConfigChanged,
 }
@@ -138,6 +149,10 @@ pub enum UserEvent {
 enum ToolbarCmd {
     Ready,
     Navigate { input: String },
+    /// Address bar text changed: show history matches under the field at `x`/`w` (logical px).
+    Suggest { text: String, x: f64, w: f64 },
+    SuggestSel { sel: i32 },
+    SuggestHide,
     NewTab,
     NewWindow,
     CloseTab { id: u32 },
@@ -261,6 +276,18 @@ struct Browser {
     /// Auto-hide tab panel (toolbar.html in flyout mode), created on first hover.
     flyout: Option<WebView>,
     flyout_visible: bool,
+    history: history::History,
+    /// Address bar suggestion dropdown (suggest.html), built hidden at startup so it can slide
+    /// over the page like the tab flyout.
+    suggest: Option<WebView>,
+    suggest_visible: bool,
+    /// Bottom-left total-RAM chip (ram.html), a small overlay over the page.
+    ram: Option<WebView>,
+    session_path: PathBuf,
+    /// Last session JSON written, so ticks only touch the disk when the tabs changed.
+    session_saved: String,
+    /// When the in-flight ambient capture started (None = idle).
+    ambient_busy: Rc<Cell<Option<Instant>>>,
 }
 
 /// Every webview on the shared profile must be created with identical environment options
@@ -360,6 +387,73 @@ const PAGE_AMBIENT_JS: &str = r#"(() => {
     return out.slice(0, 5);
   } catch (_) { return []; }
 })()"#;
+
+/// Reads a whole in-memory stream (a `CapturePreview` result).
+fn read_stream(stream: &IStream) -> Option<Vec<u8>> {
+    unsafe {
+        let mut stat = STATSTG::default();
+        stream.Stat(&mut stat, STATFLAG_NONAME).ok()?;
+        let len = stat.cbSize as usize;
+        stream.Seek(0, STREAM_SEEK_SET, None).ok()?;
+        let mut buf = vec![0u8; len];
+        let mut read = 0u32;
+        if stream.Read(buf.as_mut_ptr().cast(), len as u32, Some(&mut read)).is_err() {
+            return None;
+        }
+        buf.truncate(read as usize);
+        Some(buf)
+    }
+}
+
+/// Up to five `[r, g, b]` glow colors from a page capture, dominant first. Each region next to
+/// the chrome (top middle, top corners, left side, centre) contributes its most prominent
+/// color, favouring saturated ones over the grey that averaging video frames gives.
+fn ambient_from_jpeg(bytes: &[u8]) -> Option<Vec<[u8; 3]>> {
+    const REGIONS: [(f32, f32, f32, f32); 6] = [
+        (0.2, 0.0, 0.8, 0.25),
+        (0.0, 0.0, 0.4, 0.3),
+        (0.6, 0.0, 1.0, 0.3),
+        (0.0, 0.2, 0.3, 0.8),
+        (0.3, 0.3, 0.7, 0.7),
+        (0.0, 0.0, 1.0, 1.0),
+    ];
+    const W: u32 = 48;
+    const H: u32 = 30;
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok()?;
+    let small = img.resize_exact(W, H, image::imageops::FilterType::Triangle).to_rgb8();
+    let mut out: Vec<[u8; 3]> = Vec::new();
+    for (x0, y0, x1, y1) in REGIONS {
+        // 8 levels per channel; (count, sum r, sum g, sum b)
+        let mut buckets = vec![(0u32, 0u32, 0u32, 0u32); 512];
+        let (px0, px1) = ((x0 * W as f32) as u32, ((x1 * W as f32) as u32).max(1).min(W));
+        let (py0, py1) = ((y0 * H as f32) as u32, ((y1 * H as f32) as u32).max(1).min(H));
+        for y in py0..py1 {
+            for x in px0..px1 {
+                let p = small.get_pixel(x, y).0;
+                let i = ((p[0] >> 5) as usize) << 6 | ((p[1] >> 5) as usize) << 3 | (p[2] >> 5) as usize;
+                let b = &mut buckets[i];
+                *b = (b.0 + 1, b.1 + p[0] as u32, b.2 + p[1] as u32, b.3 + p[2] as u32);
+            }
+        }
+        let best = buckets.iter().filter(|b| b.0 > 0).max_by(|a, b| {
+            let weight = |b: &&(u32, u32, u32, u32)| {
+                let m = [b.1 / b.0, b.2 / b.0, b.3 / b.0];
+                let sat = (m.iter().max().unwrap() - m.iter().min().unwrap()) as f32 / 255.0;
+                b.0 as f32 * (1.0 + 1.5 * sat)
+            };
+            weight(a).total_cmp(&weight(b))
+        })?;
+        let c = [(best.1 / best.0) as u8, (best.2 / best.0) as u8, (best.3 / best.0) as u8];
+        let distinct = out.iter().all(|o| {
+            (o[0] as i32 - c[0] as i32).abs() + (o[1] as i32 - c[1] as i32).abs() + (o[2] as i32 - c[2] as i32).abs() >= 36
+        });
+        if distinct {
+            out.push(c);
+        }
+    }
+    out.truncate(5);
+    (!out.is_empty()).then_some(out)
+}
 
 /// Profile-wide preferences: the color scheme pages see (`prefers-color-scheme`) and Edge's
 /// tracking prevention level.
@@ -693,6 +787,182 @@ impl Browser {
         self.sync_toolbar();
     }
 
+    /// Writes the open tabs (and which one is active) when they differ from the last write.
+    fn save_session(&mut self) {
+        // Closing the last tab empties the list on the way out: keep the previous session then.
+        if self.tabs.is_empty() {
+            return;
+        }
+        // Sites like YouTube change the address without a page load, so `t.url` goes stale:
+        // ask the webview for its real current address.
+        let live = |t: &Tab| -> String {
+            if !t.discarded && !t.settings_page.get() {
+                if let Ok(core) = unsafe { t.webview.controller().CoreWebView2() } {
+                    let mut src = windows::core::PWSTR::null();
+                    if unsafe { core.Source(&mut src) }.is_ok() {
+                        let s = webview2_com::take_pwstr(src);
+                        if s.starts_with("http://") || s.starts_with("https://") {
+                            return s;
+                        }
+                    }
+                }
+            }
+            t.url.clone()
+        };
+        let all: Vec<String> = self.tabs.iter().map(live).collect();
+        let urls: Vec<&str> = all.iter().map(String::as_str).filter(|u| !u.is_empty() && *u != "about:blank").collect();
+        let active_url = all.get(self.active).map(String::as_str).unwrap_or("");
+        let active = urls.iter().position(|u| *u == active_url).unwrap_or(0);
+        let json = json!({ "active": active, "urls": urls }).to_string();
+        if json != self.session_saved && std::fs::write(&self.session_path, &json).is_ok() {
+            self.session_saved = json;
+        }
+    }
+
+    /// Reopens the tabs from the previous run.
+    fn restore_session(&mut self) {
+        #[derive(Deserialize)]
+        struct Session {
+            active: usize,
+            urls: Vec<String>,
+        }
+        let Some(s) = std::fs::read_to_string(&self.session_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Session>(&t).ok())
+        else {
+            return;
+        };
+        let active = s.active.min(s.urls.len().saturating_sub(1));
+        for (i, url) in s.urls.iter().enumerate() {
+            if i == active || url == "about:settings" {
+                self.open_tab(url);
+            } else {
+                // Only the visible tab loads now; the others are opened unloaded and load when
+                // first selected (several pages loading at once, hidden, also stalled video pages).
+                self.open_tab_in("about:blank", true);
+                if let Some(tab) = self.tabs.last_mut() {
+                    tab.url = url.clone();
+                    tab.discarded = true;
+                }
+            }
+        }
+        if !self.tabs.is_empty() {
+            self.switch_to(active);
+        }
+    }
+
+    fn ram_rect(&self) -> Rect {
+        let (_, h) = self.logical_size();
+        Rect {
+            position: LogicalPosition::new(8.0, (h - 30.0).max(0.0)).into(),
+            size: LogicalSize::new(110.0, 22.0).into(),
+        }
+    }
+
+    fn build_ram(&mut self) {
+        let rect = self.ram_rect();
+        let built = profile_builder(&mut self.web_context, &self.settings.memory)
+            .with_html(include_str!("ram.html"))
+            .with_initialization_script(theme_init_script(&self.user_css))
+            .with_initialization_script(internal_mode_init(&self.mode_css))
+            .with_transparent(true)
+            .with_background_color((0, 0, 0, 0))
+            .with_bounds(rect)
+            .build_as_child(&self.window);
+        match built {
+            Ok(w) => self.ram = Some(w),
+            Err(e) => tracing::warn!("couldn't create the RAM readout: {e}"),
+        }
+    }
+
+    /// Total private memory of the browser (its own process plus every WebView2 process).
+    fn update_ram(&self) {
+        let Some(ram) = &self.ram else { return };
+        let own = unsafe {
+            use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+            use windows::Win32::System::Threading::GetCurrentProcess;
+            let mut c = PROCESS_MEMORY_COUNTERS_EX::default();
+            let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+            if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS, size).as_bool() {
+                c.PrivateUsage as u64
+            } else {
+                0
+            }
+        };
+        let webview = self
+            .tabs
+            .first()
+            .and_then(|t| unsafe { t.webview.controller().CoreWebView2() }.ok())
+            .and_then(|core| process_memory(&core))
+            .map_or(0, |(bytes, _)| bytes);
+        let total = own + webview;
+        let text = if total >= 1 << 30 {
+            format!("{:.1} GB", total as f64 / (1u64 << 30) as f64)
+        } else {
+            format!("{} MB", total >> 20)
+        };
+        let _ = ram.evaluate_script(&format!("ram.set({})", serde_json::to_string(&text).unwrap_or_default()));
+        unsafe {
+            let _ = SetWindowPos(HWND(ram.hwnd().0 as _), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+
+    fn build_suggest(&mut self) {
+        let proxy = self.proxy.clone();
+        let built = profile_builder(&mut self.web_context, &self.settings.memory)
+            .with_html(include_str!("suggest.html"))
+            .with_initialization_script(theme_init_script(&self.user_css))
+            .with_initialization_script(internal_mode_init(&self.mode_css))
+            .with_transparent(true)
+            .with_background_color((0, 0, 0, 0))
+            .with_visible(false)
+            .with_bounds(Rect {
+                position: LogicalPosition::new(0.0, 0.0).into(),
+                size: LogicalSize::new(1.0, 1.0).into(),
+            })
+            .with_ipc_handler(move |req| {
+                let _ = proxy.send_event(UserEvent::Ipc(req.body().clone()));
+            })
+            .build_as_child(&self.window);
+        match built {
+            Ok(w) => self.suggest = Some(w),
+            Err(e) => tracing::warn!("couldn't create the address bar suggestions: {e}"),
+        }
+    }
+
+    fn show_suggestions(&mut self, text: &str, x: f64, w: f64) {
+        let items = self.history.query(text, SUGGEST_MAX);
+        if items.is_empty() || self.suggest.is_none() {
+            self.hide_suggestions();
+            return;
+        }
+        let json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".into());
+        let _ = self.toolbar.evaluate_script(&format!("window.hb && hb.suggestions({json})"));
+        let rect = Rect {
+            position: LogicalPosition::new(x, TOOLBAR_ROW_H - 6.0).into(),
+            size: LogicalSize::new(w.max(200.0), items.len() as f64 * SUGGEST_ROW_H + SUGGEST_PAD).into(),
+        };
+        if let Some(s) = &self.suggest {
+            let _ = s.set_bounds(rect);
+            let _ = s.evaluate_script(&format!("sg.set({json}); sg.sel(-1);"));
+            let _ = s.set_visible(true);
+            unsafe {
+                let _ = SetWindowPos(HWND(s.hwnd().0 as _), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+        self.suggest_visible = true;
+    }
+
+    fn hide_suggestions(&mut self) {
+        if !self.suggest_visible {
+            return;
+        }
+        if let Some(s) = &self.suggest {
+            let _ = s.set_visible(false);
+        }
+        self.suggest_visible = false;
+    }
+
     /// Keeps the toolbar under the page, popups and menus (it's full-window now).
     fn keep_toolbar_behind(&self) {
         let hwnd = self.toolbar.hwnd();
@@ -740,6 +1010,9 @@ impl Browser {
         if let Some(f) = &self.flyout {
             let _ = f.evaluate_script(&script);
         }
+        if let Some(s) = &self.suggest {
+            let _ = s.evaluate_script(&script);
+        }
         for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
             let _ = tab.webview.evaluate_script(&script);
         }
@@ -781,11 +1054,53 @@ impl Browser {
         });
     }
 
-    /// Samples the active page's colors for the ambient glow.
+    /// Samples the active page's colors for the ambient glow from a capture of what is actually
+    /// on screen (images and video included); falls back to CSS colors if the capture fails.
     fn measure_ambient(&self) {
         if !self.settings.appearance.ambient {
             return;
         }
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.settings_page.get() || tab.discarded {
+            return;
+        }
+        if self.ambient_busy.get().is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+            return;
+        }
+        let Some(stream) = (unsafe { SHCreateMemStream(None) }) else {
+            self.measure_ambient_css();
+            return;
+        };
+        self.ambient_busy.set(Some(Instant::now()));
+        let (id, proxy, busy, read_from) = (tab.id, self.proxy.clone(), self.ambient_busy.clone(), stream.clone());
+        let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+            busy.set(None);
+            match result.ok().and_then(|_| read_stream(&read_from)) {
+                Some(bytes) => {
+                    // Decoding and quantizing happens off the UI thread.
+                    std::thread::spawn(move || match ambient_from_jpeg(&bytes) {
+                        Some(colors) => { let _ = proxy.send_event(UserEvent::PageAmbient(id, colors)); }
+                        None => { let _ = proxy.send_event(UserEvent::AmbientFallback(id)); }
+                    });
+                }
+                None => { let _ = proxy.send_event(UserEvent::AmbientFallback(id)); }
+            }
+            Ok(())
+        }));
+        let started = match unsafe { tab.webview.controller().CoreWebView2() } {
+            Ok(core) => unsafe {
+                core.CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG, &stream, &handler).is_ok()
+            },
+            Err(_) => false,
+        };
+        if !started {
+            self.ambient_busy.set(None);
+            self.measure_ambient_css();
+        }
+    }
+
+    /// CSS-only sampling (backgrounds, theme-color, link color): no pixels needed.
+    fn measure_ambient_css(&self) {
         let Some(tab) = self.tabs.get(self.active) else { return };
         if tab.settings_page.get() || tab.discarded {
             return;
@@ -821,6 +1136,9 @@ impl Browser {
     fn layout(&self) {
         let _ = self.toolbar.set_bounds(self.toolbar_rect());
         self.keep_toolbar_behind();
+        if let Some(r) = &self.ram {
+            let _ = r.set_bounds(self.ram_rect());
+        }
         if let (Some(f), true) = (&self.flyout, self.flyout_visible) {
             let _ = f.set_bounds(self.flyout_rect());
         }
@@ -885,6 +1203,11 @@ impl Browser {
     }
 
     fn open_tab(&mut self, url: &str) {
+        self.open_tab_in(url, false);
+    }
+
+    /// `background`: create the tab hidden and leave the current tab visible and active.
+    fn open_tab_in(&mut self, url: &str, background: bool) {
         let id = self.next_id;
         self.next_id += 1;
         let is_settings = url == "about:settings";
@@ -956,7 +1279,9 @@ impl Browser {
             self.extensions_loaded = true;
         }
 
-        self.send_to_background(self.active);
+        if !background {
+            self.send_to_background(self.active);
+        }
         self.tabs.push(Tab {
             id,
             webview,
@@ -972,7 +1297,12 @@ impl Browser {
             tone: None,
             ambient: Vec::new(),
         });
-        self.active = self.tabs.len() - 1;
+        if background {
+            // Opened behind the current tab without disturbing it (session restore).
+            self.send_to_background(self.tabs.len() - 1);
+        } else {
+            self.active = self.tabs.len() - 1;
+        }
         if self.tabs.len() == 1 {
             self.apply_profile();
         }
@@ -1336,7 +1666,15 @@ impl Browser {
                         }
                         self.refresh_extensions();
                     }
+                    ToolbarCmd::Suggest { text, x, w } => self.show_suggestions(&text, x, w),
+                    ToolbarCmd::SuggestSel { sel } => {
+                        if let Some(s) = self.suggest.as_ref().filter(|_| self.suggest_visible) {
+                            let _ = s.evaluate_script(&format!("sg.sel({sel})"));
+                        }
+                    }
+                    ToolbarCmd::SuggestHide => self.hide_suggestions(),
                     ToolbarCmd::Navigate { input } => {
+                        self.hide_suggestions();
                         let url = resolve_input(&input, &self.settings.search_engine);
                         if let Some(tab) = self.tabs.get_mut(self.active) {
                             if url == "about:settings" {
@@ -1449,6 +1787,7 @@ impl Browser {
                     }
                     ToolbarCmd::ClearData => {
                         self.close_popup();
+                        self.history.clear();
                         if let Some(tab) = self.tabs.get(self.active) {
                             if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
                                 if let Ok(c13) = core.cast::<ICoreWebView2_13>() {
@@ -1583,6 +1922,7 @@ impl Browser {
                     // An unloaded tab keeps showing its real title, not about:blank's; the
                     // settings page (NavigateToString) has no useful document title.
                     if !self.tabs[i].discarded && !self.tabs[i].settings_page.get() {
+                        self.history.set_title(&self.tabs[i].url, &title);
                         self.tabs[i].title = title;
                         self.sync_toolbar();
                     }
@@ -1601,6 +1941,9 @@ impl Browser {
                     }
                     if !t.settings_page.get() {
                         *t.page_url.borrow_mut() = url.clone();
+                        if started {
+                            self.history.visit(&url);
+                        }
                         t.url = url;
                     }
                     t.loading = started;
@@ -1682,6 +2025,9 @@ impl Browser {
                     let _ = f.evaluate_script(&script);
                 }
                 let page_script = theme_apply_js(&css);
+                if let Some(s) = &self.suggest {
+                    let _ = s.evaluate_script(&page_script);
+                }
                 for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
                     let _ = tab.webview.evaluate_script(&page_script);
                 }
@@ -1716,9 +2062,25 @@ impl Browser {
                     }
                 }
             }
+            UserEvent::AmbientFallback(id) => {
+                if self.tab_index(id) == Some(self.active) {
+                    self.measure_ambient_css();
+                }
+            }
+            UserEvent::AmbientTick => {
+                if !self.window.is_minimized() {
+                    self.measure_ambient();
+                }
+            }
             UserEvent::PageAmbient(id, colors) => {
                 if let Some(i) = self.tab_index(id) {
-                    if self.tabs[i].ambient != colors {
+                    // Ignore sampling noise so a steady page doesn't keep re-rendering the chrome.
+                    let close = |a: &[u8; 3], b: &[u8; 3]| {
+                        a.iter().zip(b).map(|(x, y)| (*x as i32 - *y as i32).abs()).sum::<i32>() < 14
+                    };
+                    let same = colors.len() == self.tabs[i].ambient.len()
+                        && colors.iter().zip(&self.tabs[i].ambient).all(|(a, b)| close(a, b));
+                    if !same {
                         self.tabs[i].ambient = colors;
                         if i == self.active {
                             self.sync_toolbar();
@@ -1729,6 +2091,9 @@ impl Browser {
             UserEvent::MemoryTick => {
                 // Pages can switch their own theme; keep "match website colors" in step.
                 self.measure_tone();
+                self.history.save_if_dirty();
+                self.save_session();
+                self.update_ram();
                 self.memory_tick();
                 if self.tabs.iter().any(|t| t.settings_page.get()) {
                     self.push_settings_state();
@@ -1834,6 +2199,8 @@ fn main() -> anyhow::Result<()> {
         css: css_path,
     };
     let user_css = std::fs::read_to_string(&paths.css).unwrap_or_default();
+    let history_path = paths.root.join("history.json");
+    let session_path = paths.root.join("session.json");
     std::fs::create_dir_all(&paths.extensions)?;
     // Before WebView2 installs them, so Proton Pass gets its store id (see `ensure_store_keys`).
     extensions::ensure_store_keys(&paths.extensions);
@@ -1936,10 +2303,29 @@ fn main() -> anyhow::Result<()> {
         mode_css: String::new(),
         flyout: None,
         flyout_visible: false,
+        history: history::History::load(history_path),
+        suggest: None,
+        suggest_visible: false,
+        ram: None,
+        session_path,
+        session_saved: String::new(),
+        ambient_busy: Rc::new(Cell::new(None)),
     };
+    browser.build_suggest();
+    browser.build_ram();
+    let proxy_amb = proxy.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(1500));
+        if proxy_amb.send_event(UserEvent::AmbientTick).is_err() {
+            break;
+        }
+    });
     adblock_filter::spawn_engine_loader(browser.paths.adblock.clone(), proxy.clone());
     if args.is_empty() {
-        browser.open_tab(HOME);
+        browser.restore_session();
+        if browser.tabs.is_empty() {
+            browser.open_tab(HOME);
+        }
     }
     for arg in &args {
         let url = resolve_input(arg, &browser.settings.search_engine);
@@ -1966,10 +2352,18 @@ fn main() -> anyhow::Result<()> {
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                browser.save_session();
+                browser.history.save_if_dirty();
+                *control_flow = ControlFlow::Exit;
+            }
             Event::WindowEvent { event: WindowEvent::Resized(_), .. } => browser.layout(),
             Event::UserEvent(event) => {
                 if !browser.handle(event) {
+                    // The close button / closing the last tab: tabs are still intact here
+                    // (the last-tab case leaves the list empty, which save_session ignores).
+                    browser.save_session();
+                    browser.history.save_if_dirty();
                     *control_flow = ControlFlow::Exit;
                 }
             }
