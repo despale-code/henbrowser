@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 pub struct BrowserSettings {
     pub search_engine: String,
     pub memory: MemorySettings,
+    pub appearance: AppearanceSettings,
+    pub privacy: PrivacySettings,
 }
 
 impl Default for BrowserSettings {
@@ -17,8 +19,68 @@ impl Default for BrowserSettings {
         Self {
             search_engine: crate::SEARCH.to_owned(),
             memory: MemorySettings::preset("balanced").unwrap(),
+            appearance: AppearanceSettings::default(),
+            privacy: PrivacySettings::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AppearanceSettings {
+    /// `system` (ChickenWM's theme mode), `light` or `dark` — same accent palette either way.
+    pub theme: String,
+    /// Switch the browser's chrome between light and dark to match each page's background.
+    pub match_website: bool,
+    /// Tabs in a sidebar on the left instead of a strip under the toolbar.
+    pub vertical_tabs: bool,
+    /// Vertical tab sidebar shows icons only.
+    pub sidebar_collapsed: bool,
+    /// Vertical tabs hide to a thin edge strip and slide out over the page on hover.
+    pub sidebar_autohide: bool,
+    /// UI motion (tab open/close, sliding highlight, theme cross-fades).
+    pub animations: bool,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme: "system".into(),
+            match_website: false,
+            vertical_tabs: false,
+            sidebar_collapsed: false,
+            sidebar_autohide: false,
+            animations: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PrivacySettings {
+    /// Edge's built-in tracking prevention: `none`, `basic`, `balanced` or `strict`. The ad
+    /// blocker already removes trackers, so `basic` avoids breaking sign-in flows by default.
+    pub tracking_prevention: String,
+    /// Sites (host names, `www.` stripped) where the ad blocker is turned off.
+    pub adblock_allowlist: Vec<String>,
+}
+
+impl Default for PrivacySettings {
+    fn default() -> Self {
+        Self { tracking_prevention: "basic".into(), adblock_allowlist: Vec::new() }
+    }
+}
+
+/// `www.example.com` → `example.com`; `None` for non-web URLs.
+pub fn site_of(url: &str) -> Option<String> {
+    let rest = url.split_once("://").filter(|(s, _)| *s == "http" || *s == "https")?.1;
+    let host = rest.split(['/', '?', '#']).next()?.rsplit('@').next()?.split(':').next()?;
+    (!host.is_empty()).then(|| host.trim_start_matches("www.").to_ascii_lowercase())
+}
+
+/// Whether `url`'s host is `site` or one of its subdomains.
+pub fn url_on_site(url: &str, site: &str) -> bool {
+    site_of(url).is_some_and(|h| h == site || h.ends_with(&format!(".{site}")))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -169,6 +231,17 @@ mod tests {
         live_only.suspend_after_secs = 5;
         assert!(!balanced.needs_restart(&live_only));
         assert!(MemorySettings::preset("nope").is_none());
+    }
+
+    #[test]
+    fn site_matching() {
+        assert_eq!(site_of("https://www.Example.com:8080/a?b#c").as_deref(), Some("example.com"));
+        assert_eq!(site_of("about:blank"), None);
+        assert!(url_on_site("https://aos.istanbul.edu.tr/x", "istanbul.edu.tr"));
+        assert!(!url_on_site("https://notistanbul.edu.tr/", "istanbul.edu.tr"));
+        let s: BrowserSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.appearance.theme, "system");
+        assert_eq!(s.privacy.tracking_prevention, "basic");
     }
 
     #[test]

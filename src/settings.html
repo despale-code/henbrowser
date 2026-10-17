@@ -97,7 +97,36 @@
   }
   .section.active {
     display: block;
+    animation: section-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
+  @keyframes section-in { from { opacity: 0; transform: translateY(8px); } }
+  .card { transition: background-color 320ms, border-color 320ms; }
+  html, body, #sidebar, .nav-item { transition: background-color 320ms, color 320ms; }
+  .nav-item { transition: background-color 180ms, color 180ms, transform 200ms cubic-bezier(0.05, 0.9, 0.1, 1.05); }
+  .nav-item:active { transform: scale(0.98); }
+  /* Toggle switch */
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch .knob {
+    position: absolute; inset: 0; border-radius: 11px;
+    background: var(--border-color);
+    transition: background-color 220ms;
+  }
+  .switch .knob::after {
+    content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--subtext-color);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 260ms cubic-bezier(0.05, 0.9, 0.1, 1.05);
+  }
+  .switch input:checked + .knob { background: var(--accent-color); }
+  .switch input:checked + .knob::after { transform: translateX(18px); background: var(--accent-fg); }
+  .site-chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; margin: 4px 6px 0 0;
+    border: 1px solid var(--border-color); border-radius: 14px; font-size: 12px;
+    animation: section-in 220ms both;
+  }
+  .site-chip button { border: 0; background: none; color: inherit; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; }
+  .site-chip button:hover { background: var(--hover-bg); }
   h1 {
     font-size: 24px;
     font-weight: 500;
@@ -464,6 +493,24 @@
           </div>
           <span class="badge success">Active</span>
         </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Tracking prevention</div>
+            <div class="card-desc">Edge's built-in protection, on top of the ad blocker. Balanced and Strict can break sign-in pages that share logins between sites.</div>
+          </div>
+          <select id="tracking-select">
+            <option value="none">Off</option>
+            <option value="basic">Basic (recommended)</option>
+            <option value="balanced">Balanced</option>
+            <option value="strict">Strict</option>
+          </select>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Ad blocking turned off on</div>
+            <div class="card-desc" id="allowlist">No sites. Click the shield in the address bar to turn blocking off for a site that breaks.</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -473,8 +520,50 @@
       <div class="card">
         <div class="card-row">
           <div class="card-info">
-            <div class="card-title">Theme styling</div>
-            <div class="card-desc">Sepia Islands theme matching ~/.config/chickenwm/roobar.css</div>
+            <div class="card-title">Dark mode</div>
+            <div class="card-desc">Same accent palette, dark surfaces. Websites that support dark mode follow along.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="dark-toggle"><span class="knob"></span></label>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Follow ChickenWM theme</div>
+            <div class="card-desc">Use whatever light/dark mode the system theme is set to (Settings → Appearance in ChickenWM)</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="follow-toggle"><span class="knob"></span></label>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Match website colors</div>
+            <div class="card-desc">Switch the toolbar to light or dark depending on the background of the page you're viewing</div>
+          </div>
+          <label class="switch"><input type="checkbox" data-ap="match_website"><span class="knob"></span></label>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Vertical tabs</div>
+            <div class="card-desc">Show tabs in a sidebar on the left. Collapse it to icons with the &#x00ab; button.</div>
+          </div>
+          <label class="switch"><input type="checkbox" data-ap="vertical_tabs"><span class="knob"></span></label>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Auto-hide vertical tabs</div>
+            <div class="card-desc">The sidebar tucks away to a thin strip; hover the left edge to slide it out over the page</div>
+          </div>
+          <label class="switch"><input type="checkbox" data-ap="sidebar_autohide"><span class="knob"></span></label>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Animations</div>
+            <div class="card-desc">Tab open/close, sliding highlight, sidebar slide and theme cross-fades</div>
+          </div>
+          <label class="switch"><input type="checkbox" data-ap="animations"><span class="knob"></span></label>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Custom styling</div>
+            <div class="card-desc">Colors come from ~/.config/chickenwm/browser.css, written by the ChickenWM theme. Edit it for anything else.</div>
           </div>
           <button class="btn secondary" id="btn-edit-css">Edit browser.css</button>
         </div>
@@ -585,8 +674,66 @@
   };
   document.getElementById("btn-restart").onclick = () => post({ cmd: "restart_browser" });
 
+  let appearance = null, privacy = null;
+  let systemDark = false;
+  const darkToggle = document.getElementById("dark-toggle");
+  const followToggle = document.getElementById("follow-toggle");
+  // Light/dark is stored by ChickenWM's master theme provider (app_modes = browser:…), the same
+  // setting the other apps use.
+  darkToggle.onchange = () => post({ cmd: "set_app_mode", mode: darkToggle.checked ? "dark" : "light" });
+  followToggle.onchange = () => post({ cmd: "set_app_mode", mode: followToggle.checked ? "system" : (systemDark ? "dark" : "light") });
+  document.querySelectorAll("[data-ap]").forEach((el) => {
+    el.onchange = () => {
+      if (!appearance) return;
+      appearance[el.dataset.ap] = el.checked;
+      post({ cmd: "set_appearance", appearance });
+    };
+  });
+  document.getElementById("tracking-select").onchange = (e) => {
+    if (!privacy) return;
+    privacy.tracking_prevention = e.target.value;
+    post({ cmd: "set_privacy", privacy });
+  };
+  function renderAllowlist() {
+    const box = document.getElementById("allowlist");
+    if (!privacy.adblock_allowlist.length) {
+      box.textContent = "No sites. Click the shield in the address bar to turn blocking off for a site that breaks.";
+      return;
+    }
+    box.textContent = "";
+    for (const site of privacy.adblock_allowlist) {
+      const chip = document.createElement("span");
+      chip.className = "site-chip";
+      chip.textContent = site;
+      const x = document.createElement("button");
+      x.textContent = "\u2715";
+      x.title = "Turn ad blocking back on for " + site;
+      x.onclick = () => {
+        privacy.adblock_allowlist = privacy.adblock_allowlist.filter((s) => s !== site);
+        post({ cmd: "set_privacy", privacy });
+      };
+      chip.appendChild(x);
+      box.appendChild(chip);
+    }
+  }
+
   window.hbSettings = {
     render(state) {
+      if (state.appearance) {
+        appearance = state.appearance;
+        systemDark = !!state.system_dark;
+        const follow = (state.app_mode || "system") === "system";
+        followToggle.checked = follow;
+        darkToggle.checked = follow ? systemDark : state.app_mode === "dark";
+        darkToggle.disabled = follow;
+        darkToggle.closest(".card-row").style.opacity = follow ? 0.55 : 1;
+        document.querySelectorAll("[data-ap]").forEach((el) => { el.checked = !!appearance[el.dataset.ap]; });
+      }
+      if (state.privacy) {
+        privacy = state.privacy;
+        document.getElementById("tracking-select").value = privacy.tracking_prevention;
+        renderAllowlist();
+      }
       memory = state.memory;
       document.getElementById("search-select").value = state.search_engine;
       const preset = document.getElementById("mem-preset");

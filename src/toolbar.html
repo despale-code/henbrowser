@@ -4,34 +4,38 @@
 <meta charset="utf-8">
 <style>
   /* =========================================================================
-   * ChickenBrowser Safari-Style Minimalist UI
-   * Themed for ChickenWM with #141413 accent and DepartureMono.
+   * ChickenBrowser chrome: toolbar row, tab strip / vertical tab sidebar.
    *
-   * Customizable via ~/.config/chickenwm/browser.css (live hot-reloaded).
+   * This page covers the whole window *behind* the web page; the page is laid out on top of
+   * the content area, so only the toolbar row and the tab strip (or sidebar) are visible.
+   *
+   * Colors come from ~/.config/chickenwm/browser.css (hot-reloaded) and, when a light/dark
+   * override or "match website colors" is active, from #mode-theme.
    * ========================================================================= */
   :root {
-    --bg-color: #f0e6d3;
-    --tab-strip-bg: #e6dac3;
-    --surface-color: #fffcf5;
-    --field-bg: rgba(255, 252, 245, 0.85);
-    --field-hover-bg: #fffcf5;
-    --field-focus-bg: #ffffff;
+    --bg-color: #f2f1f0;
+    --tab-strip-bg: #e8e6e3;
+    --sidebar-bg: #e8e6e3;
+    --surface-color: #fbfbfb;
+    --field-bg: rgba(251, 251, 251, 0.85);
+    --field-hover-bg: #fbfbfb;
+    --field-focus-bg: #fbfbfb;
 
-    --fg-color: #2b1d14;
-    --subtext-color: #6b5545;
-    --faint-color: rgba(43, 29, 20, 0.45);
+    --fg-color: #242321;
+    --subtext-color: #625f59;
+    --faint-color: rgba(36, 35, 33, 0.45);
 
-    --accent-color: #3b2a1f;
-    --accent-fg: #f5ecdc;
-    --accent-secondary: #8a6a50;
-    --accent-ring: #3b2a1f;
-    --hover-bg: rgba(59, 42, 31, 0.12);
-    --press-bg: rgba(59, 42, 31, 0.22);
+    --accent-color: #242321;
+    --accent-fg: #f7f6f6;
+    --accent-secondary: #625f59;
+    --accent-ring: #242321;
+    --hover-bg: rgba(36, 35, 33, 0.07);
+    --press-bg: rgba(36, 35, 33, 0.14);
 
-    --border-color: rgba(59, 42, 31, 0.28);
-    --shadow-color: rgba(30, 20, 12, 0.24);
+    --border-color: rgba(36, 35, 33, 0.16);
+    --shadow-color: rgba(20, 19, 18, 0.18);
     --border-radius: 8px;
-    --tab-radius: 6px;
+    --tab-radius: 7px;
 
     --close-hover-bg: #d32f2f;
     --close-hover-fg: #ffffff;
@@ -41,6 +45,14 @@
 
     --anim-duration: 200ms;
     --anim-bezier: cubic-bezier(0.05, 0.9, 0.1, 1.05);
+    --anim-smooth: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --theme-fade: 320ms;
+
+    /* Layout (sizes must match TOOLBAR_ROW_H / TOOLBAR_H / SIDEBAR_W in main.rs) */
+    --row-h: 48px;
+    --strip-h: 34px;
+    --sidebar-w: 240px;
+    --sidebar-collapsed-w: 56px;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,6 +65,7 @@
     font-size: var(--font-size);
     user-select: none;
     -webkit-font-smoothing: antialiased;
+    transition: background-color var(--theme-fade) var(--anim-smooth), color var(--theme-fade) var(--anim-smooth);
   }
   button {
     font: inherit;
@@ -64,22 +77,27 @@
     place-items: center;
   }
 
+  /* Motion off: the browser's own Animations setting (deliberately not Windows' "reduce motion",
+     which many tiling-WM setups turn off system-wide). */
+  body.no-anim *, body.no-anim *::before, body.no-anim *::after { transition: none !important; animation: none !important; }
+
   /* Top-edge invisible resize grips (for borderless window) */
   .grip { position: fixed; z-index: 20; }
   #grip-n  { top: 0; left: 10px; right: 10px; height: 4px; cursor: ns-resize; }
   #grip-nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
   #grip-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
 
-  /* ── Safari UX Row 1: Main Toolbar ── */
+  /* ── Row 1: toolbar ── */
   #row {
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 48px;
+    height: var(--row-h);
     padding: 0 0 0 12px;
     background: var(--bg-color);
     position: relative;
     z-index: 5;
+    transition: background-color var(--theme-fade) var(--anim-smooth);
   }
   .spacer { flex: 1 1 0; min-width: 8px; align-self: stretch; }
 
@@ -89,35 +107,33 @@
     border-radius: var(--border-radius);
     color: var(--fg-color);
     flex: none;
-    transition: background var(--anim-duration) var(--anim-bezier),
-                color var(--anim-duration) var(--anim-bezier),
-                transform 100ms var(--anim-bezier);
+    transition: background-color var(--anim-duration) var(--anim-smooth),
+                color var(--theme-fade) var(--anim-smooth),
+                transform 160ms var(--anim-bezier);
   }
   .btn:hover { background: var(--hover-bg); }
-  .btn:active { background: var(--press-bg); transform: scale(0.93); }
+  .btn:active { background: var(--press-bg); transform: scale(0.9); }
+  .btn:disabled { opacity: 0.35; }
+  #back:hover:not(:disabled) { transform: translateX(-2px); }
+  #fwd:hover:not(:disabled) { transform: translateX(2px); }
+  #newtab:hover { transform: rotate(90deg); }
+  #newtab:active { transform: rotate(90deg) scale(0.9); }
 
-  /* Window Close Button at the top right */
   #close {
     width: 44px;
     height: 100%;
     margin-left: 2px;
     color: var(--subtext-color);
     font-size: 15px;
-    display: grid;
-    place-items: center;
-    transition: background var(--anim-duration) var(--anim-bezier),
-                color var(--anim-duration) var(--anim-bezier);
+    transition: background-color var(--anim-duration) var(--anim-smooth), color var(--anim-duration) var(--anim-smooth);
   }
-  #close:hover {
-    background: var(--close-hover-bg);
-    color: var(--close-hover-fg);
-  }
+  #close:hover { background: var(--close-hover-bg); color: var(--close-hover-fg); }
   #close:active { filter: brightness(0.9); }
 
-  /* Centered Address / Search Field (Safari Style) */
+  /* Address field */
   #field {
     position: relative;
-    flex: 0 1 680px;
+    flex: 0 1 620px;
     min-width: 240px;
     height: 34px;
     display: flex;
@@ -126,18 +142,18 @@
     background: var(--field-bg);
     border: 1px solid var(--border-color);
     overflow: hidden;
-    transition: background var(--anim-duration) var(--anim-bezier),
-                border-color var(--anim-duration) var(--anim-bezier),
-                box-shadow var(--anim-duration) var(--anim-bezier);
+    transition: background-color var(--theme-fade) var(--anim-smooth),
+                border-color var(--anim-duration) var(--anim-smooth),
+                box-shadow 260ms var(--anim-smooth),
+                flex-basis 320ms var(--anim-bezier),
+                transform 260ms var(--anim-bezier);
   }
-  #field:hover {
-    background: var(--field-hover-bg);
-    border-color: rgba(88, 91, 112, 0.8);
-  }
+  #field:hover { background: var(--field-hover-bg); border-color: var(--faint-color); }
   #field.focus {
+    flex-basis: 760px;
     background: var(--field-focus-bg);
     border-color: var(--accent-ring);
-    box-shadow: 0 0 0 2px var(--accent-ring);
+    box-shadow: 0 0 0 2px var(--accent-ring), 0 6px 18px var(--shadow-color);
   }
 
   #shield {
@@ -149,24 +165,23 @@
     color: var(--faint-color);
     font-size: 13px;
     flex: none;
-    transition: color var(--anim-duration) var(--anim-bezier);
+    border-radius: var(--border-radius) 0 0 var(--border-radius);
+    transition: color var(--anim-duration) var(--anim-smooth), opacity var(--anim-duration);
   }
+  #shield:hover { color: var(--fg-color); }
   #shield.on { color: var(--subtext-color); }
-  #shield.on #blocked {
+  #shield.off { opacity: 0.45; text-decoration: line-through; }
+  #shield #blocked {
     background: var(--border-color);
     color: var(--fg-color);
     padding: 1px 6px;
     border-radius: 4px;
     font-size: 11px;
-    font-weight: normal;
     margin-left: 2px;
+    transition: background-color var(--theme-fade), color var(--theme-fade);
   }
-  #shield.active-block {
-    animation: shield-bump 300ms var(--anim-bezier);
-  }
-  @keyframes shield-bump {
-    50% { transform: scale(1.15); color: var(--accent-ring); }
-  }
+  #shield.bump { animation: shield-bump 380ms var(--anim-bezier); }
+  @keyframes shield-bump { 40% { transform: scale(1.18); color: var(--accent-ring); } }
 
   #addr {
     flex: 1;
@@ -180,7 +195,6 @@
     font-family: inherit;
     font-size: inherit;
     text-align: center;
-    transition: text-align 100ms;
   }
   #field.focus #addr { text-align: left; }
   #addr::placeholder { color: var(--faint-color); }
@@ -191,35 +205,28 @@
     color: var(--subtext-color);
     flex: none;
     font-size: 14px;
-    transition: color var(--anim-duration) var(--anim-bezier),
-                transform 240ms var(--anim-bezier);
+    transition: color var(--anim-duration), transform 420ms var(--anim-bezier);
   }
-  #reload:hover { color: var(--fg-color); }
-  #field.loading #reload {
-    animation: spin 1s linear infinite;
-  }
+  #reload:hover { color: var(--fg-color); transform: rotate(-90deg); }
+  #field.loading #reload { animation: spin 0.9s linear infinite; }
   @keyframes spin { 100% { transform: rotate(360deg); } }
 
-  /* Animated loading progress along the bottom of the address bar */
   #progress {
     position: absolute;
     left: 0;
     bottom: 0;
     height: 2px;
     width: 100%;
-    background: var(--accent-ring);
+    background: linear-gradient(90deg, transparent, var(--accent-ring), transparent);
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--anim-duration) var(--anim-bezier);
+    transition: opacity 300ms var(--anim-smooth);
   }
-  #field.loading #progress {
-    opacity: 1;
-    animation: hypr-load 1.3s var(--anim-bezier) infinite;
-  }
-  @keyframes hypr-load {
-    0% { transform: translateX(-100%) scaleX(0.15); }
-    50% { transform: translateX(20%) scaleX(0.65); }
-    100% { transform: translateX(100%) scaleX(0.15); }
+  #field.loading #progress { opacity: 1; animation: load-sweep 1.2s var(--anim-smooth) infinite; }
+  @keyframes load-sweep {
+    0% { transform: translateX(-100%) scaleX(0.3); }
+    60% { transform: translateX(30%) scaleX(0.7); }
+    100% { transform: translateX(100%) scaleX(0.3); }
   }
 
   #exts { display: flex; gap: 3px; flex: none; }
@@ -227,115 +234,259 @@
     width: 32px;
     height: 32px;
     border-radius: var(--border-radius);
-    transition: background var(--anim-duration) var(--anim-bezier);
+    animation: pop-in 320ms var(--anim-bezier) both;
+    transition: background-color var(--anim-duration), transform 160ms var(--anim-bezier);
   }
+  .ext:hover { background: var(--hover-bg); transform: translateY(-1px); }
   .ext img { width: 18px; height: 18px; border-radius: 3px; }
   .ext.open { background: var(--press-bg); }
+  @keyframes pop-in { from { opacity: 0; transform: scale(0.6); } }
 
-  /* ── Safari UX Row 2: Tab Strip ── */
+  /* ── Tab strip (horizontal) ── */
   #tabs {
     display: flex;
-    height: 34px;
+    height: var(--strip-h);
     background: var(--tab-strip-bg);
     border-top: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
     position: relative;
     z-index: 4;
+    transition: background-color var(--theme-fade) var(--anim-smooth);
   }
   #tabs::-webkit-scrollbar { display: none; }
 
+  /* Sliding highlight behind the active tab (moves between tabs instead of jumping). */
+  #indicator {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 100%;
+    background: var(--accent-color);
+    box-shadow: 0 2px 8px var(--shadow-color);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0;
+    transition: transform 360ms var(--anim-bezier), width 360ms var(--anim-bezier),
+                height 360ms var(--anim-bezier), opacity 200ms, background-color var(--theme-fade);
+  }
+  #indicator.ready { opacity: 1; }
+
   .tab {
     position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 8px;
     flex: 1 1 0;
     min-width: 130px;
-    max-width: 280px;
-    padding: 0 32px;
+    max-width: 260px;
+    padding: 0 30px 0 12px;
     color: var(--subtext-color);
     border-right: 1px solid var(--border-color);
-    font-weight: normal;
-    transition: background var(--anim-duration) var(--anim-bezier),
-                color var(--anim-duration) var(--anim-bezier);
-    cursor: default;
+    transition: background-color var(--anim-duration) var(--anim-smooth),
+                color 260ms var(--anim-smooth),
+                min-width 300ms var(--anim-smooth), max-width 300ms var(--anim-smooth),
+                height 300ms var(--anim-smooth),
+                padding 300ms var(--anim-smooth), opacity 260ms var(--anim-smooth),
+                transform 320ms var(--anim-bezier);
   }
-  .tab:hover {
-    background: var(--hover-bg);
-    color: var(--fg-color);
+  .tab:hover:not(.active) { background: var(--hover-bg); color: var(--fg-color); }
+  .tab.active { color: var(--accent-fg); }
+  .tab.asleep:not(.active) .title, .tab.asleep:not(.active) .favicon { opacity: 0.55; }
+
+  /* Open: grow from nothing and fade in. Close: shrink away. */
+  .tab.entering {
+    opacity: 0;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    transform: scale(0.9);
+    overflow: hidden;
   }
-  .tab.active {
-    background: var(--accent-color);
-    color: var(--accent-fg);
-    font-weight: normal;
-    border-top: 2px solid var(--accent-color);
-    border-bottom: 0;
-    box-shadow: 0 2px 6px var(--shadow-color);
-  }
-  .tab.active .close {
-    color: rgba(245, 236, 220, 0.7);
-  }
-  .tab.active .close:hover {
-    color: #ffffff;
-    background: rgba(245, 236, 220, 0.22);
-  }
-  .tab.active .dot {
-    background: var(--accent-fg);
+  .tab.leaving {
+    opacity: 0;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    pointer-events: none;
+    overflow: hidden;
   }
 
+  /* Favicon (or letter avatar) with a loading ring */
+  .favicon {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--accent-fg);
+    background: var(--subtext-color);
+    transition: opacity 200ms, background-color var(--theme-fade);
+  }
+  .favicon.has-img { background: transparent; }
+  .favicon img {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 260ms var(--anim-smooth), transform 320ms var(--anim-bezier);
+  }
+  .favicon img.loaded { opacity: 1; transform: none; }
+  .tab.active .favicon:not(.has-img) { background: var(--accent-fg); color: var(--accent-color); }
+  .favicon::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    opacity: 0;
+    transition: opacity 200ms;
+  }
+  .tab.loading .favicon::after { opacity: 0.9; animation: spin 0.8s linear infinite; }
+  .tab.loading .favicon img { transform: scale(0.75); }
+
   .tab .title {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
     font-size: var(--font-size);
     font-weight: normal;
+    transition: opacity 200ms;
   }
 
   .tab .close {
     position: absolute;
-    right: 8px;
+    right: 6px;
     width: 20px;
     height: 20px;
     border-radius: 4px;
     font-size: 12px;
-    color: var(--subtext-color);
+    color: inherit;
     opacity: 0;
-    transition: opacity 120ms, background 120ms, color 120ms;
+    transform: scale(0.7);
+    transition: opacity 140ms, background-color 140ms, transform 200ms var(--anim-bezier);
   }
-  .tab:hover .close { opacity: 0.8; }
-  .tab .close:hover { opacity: 1; background: var(--press-bg); color: var(--fg-color); }
+  .tab:hover .close, .tab.active .close { opacity: 0.7; transform: none; }
+  .tab .close:hover { opacity: 1; background: var(--press-bg); }
+  .tab.active .close:hover { background: color-mix(in srgb, var(--accent-fg) 22%, transparent); }
 
-  .tab .dot {
-    position: absolute;
-    left: 10px;
+  /* ── Vertical tabs: sidebar under the toolbar row, left of the page ── */
+  body.vertical #tabs {
+    position: fixed;
+    left: 0;
+    top: var(--row-h);
+    bottom: 0;
+    width: var(--sidebar-w);
+    height: auto;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 6px 46px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: var(--sidebar-bg);
+    border-top: 1px solid var(--border-color);
+    border-bottom: 0;
+    border-right: 1px solid var(--border-color);
+    transition: width 320ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth);
+  }
+  body.vertical.collapsed #tabs { width: var(--sidebar-collapsed-w); }
+  body.vertical .tab {
+    flex: none;
+    height: 36px;
+    min-width: 0;
+    max-width: none;
+    border-right: 0;
+    border-radius: var(--tab-radius);
+    padding: 0 30px 0 10px;
+  }
+  body.vertical .tab.entering { max-width: none !important; height: 0 !important; transform: translateX(-14px); }
+  body.vertical .tab.leaving { min-width: 0 !important; height: 0 !important; margin-top: -2px; }
+  body.vertical #indicator { border-radius: var(--tab-radius); }
+  body.vertical.collapsed .tab { padding: 0; justify-content: center; }
+  body.vertical.collapsed .tab .title, body.vertical.collapsed .tab .close { display: none; }
+
+  #sidebar-toggle {
+    display: none;
+    position: fixed;
+    left: 8px;
+    bottom: 8px;
+    width: 32px;
+    height: 30px;
+    border-radius: var(--border-radius);
+    color: var(--subtext-color);
+    z-index: 6;
+    transition: background-color var(--anim-duration), transform 320ms var(--anim-bezier);
+  }
+  body.vertical #sidebar-toggle { display: grid; }
+  #sidebar-toggle:hover { background: var(--hover-bg); color: var(--fg-color); }
+  body.vertical.collapsed #sidebar-toggle { transform: rotate(180deg); }
+
+  /* ── Auto-hide: a thin strip; hovering it slides the tab panel out over the page ── */
+  body.vertical.autohide #tabs {
     width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent-ring);
-    opacity: 0;
+    padding: 0;
+    overflow: hidden;
+    cursor: default;
+    transition: background-color 200ms;
   }
-  .tab.loading .dot {
-    opacity: 1;
-    animation: pulse-dot 1s var(--anim-bezier) infinite;
+  body.vertical.autohide #tabs > * { visibility: hidden; }
+  body.vertical.autohide #tabs:hover { background: var(--accent-color); }
+  body.vertical.autohide #sidebar-toggle { display: none; }
+
+  /* ── Flyout (the sliding panel itself, a separate webview over the page) ── */
+  body.flyout { background: transparent; }
+  body.flyout #row, body.flyout .grip, body.flyout #sidebar-toggle { display: none !important; }
+  body.flyout #tabs {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--sidebar-w);
+    border-top: 0;
+    border-right: 1px solid var(--border-color);
+    transform: translateX(-104%);
+    transition: transform 280ms var(--anim-bezier), background-color var(--theme-fade);
   }
-  @keyframes pulse-dot {
-    0% { transform: scale(0.8); opacity: 0.4; }
-    50% { transform: scale(1.25); opacity: 1; box-shadow: 0 0 6px var(--shadow-color); }
-    100% { transform: scale(0.8); opacity: 0.4; }
+  body.flyout.open #tabs { transform: none; }
+  body.flyout.open.closing #tabs { transform: translateX(-104%); transition-duration: 200ms; }
+  #pin {
+    display: none;
+    position: fixed;
+    left: 8px;
+    bottom: 8px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: var(--border-radius);
+    color: var(--subtext-color);
+    font-size: 12px;
+    z-index: 6;
+    transition: background-color var(--anim-duration), color var(--anim-duration);
   }
+  body.flyout #pin { display: grid; }
+  #pin:hover { background: var(--hover-bg); color: var(--fg-color); }
 </style>
 <!-- Injected user stylesheet from ~/.config/chickenwm/browser.css -->
 <style id="user-theme"></style>
 </head>
 <body>
-  <!-- Top window resize handles -->
   <div class="grip" id="grip-n"></div>
   <div class="grip" id="grip-nw"></div>
   <div class="grip" id="grip-ne"></div>
 
-  <!-- Safari UX Row 1: Main Toolbar -->
   <div id="row">
     <button class="btn" id="back" title="Back (Alt+Left)">&#x2190;</button>
     <button class="btn" id="fwd" title="Forward (Alt+Right)">&#x2192;</button>
@@ -359,24 +510,28 @@
     <button id="close" title="Close window">&#x2715;</button>
   </div>
 
-  <!-- Safari UX Row 2: Tab Strip -->
-  <div id="tabs"></div>
+  <div id="tabs"><div id="indicator"></div></div>
+  <button id="sidebar-toggle" title="Collapse / expand tabs">&#x00ab;</button>
+  <button id="pin" title="Keep the tab sidebar open (turn off auto-hide)">&#x1f4cc; Keep open</button>
 
 <script>
   const post = (m) => window.ipc.postMessage(JSON.stringify(m));
   const $ = (id) => document.getElementById(id);
-  const tabsEl = $("tabs"), addr = $("addr"), field = $("field");
+  const tabsEl = $("tabs"), addr = $("addr"), field = $("field"), indicator = $("indicator");
+  const flyout = !!window.__CHICKEN_FLYOUT;
+  if (flyout) document.body.classList.add("flyout");
+  let autohide = false;
   let currentUrl = "";
+  let vertical = false;
 
   const pretty = (url) => {
     try {
       const u = new URL(url);
-      if (u.protocol === "http:" || u.protocol === "https:") {
-        return u.hostname.replace(/^www\./, "");
-      }
+      if (u.protocol === "http:" || u.protocol === "https:") return u.hostname.replace(/^www\./, "");
     } catch (_) {}
     return url;
   };
+  const letterOf = (t) => ((t.title || pretty(t.url) || "?").trim()[0] || "?").toUpperCase();
 
   $("close").onclick = () => post({ cmd: "close_window" });
   $("newtab").onclick = () => post({ cmd: "new_tab" });
@@ -384,6 +539,36 @@
   $("back").onclick = () => post({ cmd: "back" });
   $("fwd").onclick = () => post({ cmd: "forward" });
   $("reload").onclick = () => post({ cmd: "reload" });
+  $("shield").onclick = () => post({ cmd: "toggle_site_adblock" });
+  $("sidebar-toggle").onclick = () => post({ cmd: "toggle_sidebar" });
+  $("pin").onclick = () => post({ cmd: "toggle_sidebar_autohide" });
+
+  // Auto-hide: hovering the strip opens the panel (short delay so passing by doesn't).
+  let peekTimer = null;
+  tabsEl.addEventListener("mouseenter", () => {
+    if (flyout || !autohide || !vertical) return;
+    peekTimer = setTimeout(() => post({ cmd: "sidebar_peek", show: true }), 70);
+  });
+  tabsEl.addEventListener("mouseleave", () => { clearTimeout(peekTimer); });
+  // Flyout: slide back in when the pointer leaves the panel.
+  let closeTimer = null;
+  if (flyout) {
+    document.documentElement.addEventListener("mouseleave", () => {
+      closeTimer = setTimeout(() => {
+        document.body.classList.add("closing");
+        setTimeout(() => {
+          if (document.body.classList.contains("closing")) {
+            document.body.classList.remove("open", "closing");
+            post({ cmd: "sidebar_peek", show: false });
+          }
+        }, 210);
+      }, 160);
+    });
+    document.documentElement.addEventListener("mouseenter", () => {
+      clearTimeout(closeTimer);
+      document.body.classList.remove("closing");
+    });
+  }
 
   for (const edge of ["n", "nw", "ne"]) {
     $("grip-" + edge).onmousedown = (e) => {
@@ -392,7 +577,7 @@
   }
 
   // Dragging empty chrome space moves the window; double-click toggles maximize.
-  const isChrome = (t) => t === $("row") || t === tabsEl || t.classList.contains("spacer");
+  const isChrome = (t) => t === $("row") || (!vertical && t === tabsEl) || t.classList.contains("spacer");
   document.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || !isChrome(e.target)) return;
     e.preventDefault();
@@ -403,85 +588,160 @@
     if (e.key === "Enter") { post({ cmd: "navigate", input: addr.value }); addr.blur(); }
     if (e.key === "Escape") { addr.blur(); post({ cmd: "focus_page" }); }
   });
-  addr.addEventListener("focus", () => {
-    field.classList.add("focus");
-    addr.value = currentUrl;
-    addr.select();
-  });
-  addr.addEventListener("blur", () => {
-    field.classList.remove("focus");
-    addr.value = pretty(currentUrl);
-  });
-  tabsEl.addEventListener("wheel", (e) => { tabsEl.scrollLeft += e.deltaY; });
+  addr.addEventListener("focus", () => { field.classList.add("focus"); addr.value = currentUrl; addr.select(); });
+  addr.addEventListener("blur", () => { field.classList.remove("focus"); addr.value = pretty(currentUrl); });
+  tabsEl.addEventListener("wheel", (e) => { if (!vertical) tabsEl.scrollLeft += e.deltaY; }, { passive: true });
 
-  let lastBlockedCount = 0;
+  // ── Tabs: updated in place (keyed by id) so open / close / switch can animate ──
+  const tabEls = new Map(); // id -> element
+
+  function makeTab(t) {
+    const el = document.createElement("div");
+    el.className = "tab entering";
+    el.dataset.id = t.id;
+    el.innerHTML = '<span class="favicon"></span><span class="title"></span><button class="close" title="Close tab (Ctrl+W)">&#x2715;</button>';
+    el.onmousedown = (e) => {
+      const id = Number(el.dataset.id);
+      if (e.button === 1) { post({ cmd: "close_tab", id }); e.preventDefault(); }
+      else if (e.button === 0 && !e.target.classList.contains("close")) {
+        if (e.detail === 2 && !vertical) post({ cmd: "toggle_maximize" });
+        else if (!el.classList.contains("active")) post({ cmd: "switch_tab", id });
+        else if (!vertical) post({ cmd: "drag_window" });
+      }
+    };
+    el.querySelector(".close").onclick = (e) => { e.stopPropagation(); post({ cmd: "close_tab", id: Number(el.dataset.id) }); };
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("entering")));
+    return el;
+  }
+
+  function setFavicon(el, t) {
+    const box = el.querySelector(".favicon");
+    const want = t.icon || "";
+    if (box.dataset.src === want && box.childElementCount === (want ? 1 : 0) && (want || box.textContent)) {
+      if (!want) box.textContent = letterOf(t);
+      return;
+    }
+    box.dataset.src = want;
+    box.textContent = "";
+    box.classList.remove("has-img");
+    if (!want) { box.textContent = letterOf(t); return; }
+    const img = new Image();
+    img.alt = "";
+    img.onload = () => { box.classList.add("has-img"); img.classList.add("loaded"); };
+    img.onerror = () => { if (box.dataset.src === want) { box.textContent = letterOf(t); img.remove(); } };
+    img.src = want;
+    box.appendChild(img);
+  }
+
+  function moveIndicator() {
+    const active = tabsEl.querySelector(".tab.active:not(.leaving)");
+    if (!active) { indicator.classList.remove("ready"); return; }
+    indicator.style.width = active.offsetWidth + "px";
+    indicator.style.height = active.offsetHeight + "px";
+    indicator.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    indicator.classList.add("ready");
+  }
+
+  function renderTabs(tabs) {
+    const seen = new Set();
+    let prev = indicator;
+    for (const t of tabs) {
+      seen.add(t.id);
+      let el = tabEls.get(t.id);
+      if (!el) { el = makeTab(t); tabEls.set(t.id, el); }
+      if (prev.nextSibling !== el) prev.after(el);
+      prev = el;
+      el.classList.toggle("active", t.active);
+      el.classList.toggle("loading", t.loading);
+      el.classList.toggle("asleep", !!t.asleep);
+      el.title = t.title ? `${t.title}\n${t.url}` : t.url;
+      const title = t.title || pretty(t.url) || "New Tab";
+      const titleEl = el.querySelector(".title");
+      if (titleEl.textContent !== title) titleEl.textContent = title;
+      setFavicon(el, t);
+      if (t.active && !vertical) el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    }
+    for (const [id, el] of tabEls) {
+      if (seen.has(id)) continue;
+      tabEls.delete(id);
+      el.classList.add("leaving");
+      el.classList.remove("active");
+      setTimeout(() => { el.remove(); moveIndicator(); }, 260);
+    }
+    // Keep the highlight glued to its tab while widths animate.
+    const until = performance.now() + 420;
+    const follow = () => { moveIndicator(); if (performance.now() < until) requestAnimationFrame(follow); };
+    requestAnimationFrame(follow);
+  }
+  new ResizeObserver(() => moveIndicator()).observe(tabsEl);
+  tabsEl.addEventListener("transitionend", (e) => { if (e.target.classList?.contains("tab")) moveIndicator(); });
+
+  let lastBlocked = 0;
 
   window.hb = {
     render(s) {
-      // Tabs
-      tabsEl.innerHTML = "";
-      let loading = false;
-      for (const t of s.tabs) {
-        if (t.active) loading = t.loading;
-        const el = document.createElement("div");
-        el.className = "tab" + (t.active ? " active" : "") + (t.loading ? " loading" : "");
-        el.title = t.url;
-        el.innerHTML = '<span class="dot"></span><span class="title"></span><button class="close" title="Close tab (Ctrl+W)">&#x2715;</button>';
-        el.querySelector(".title").textContent = t.title || pretty(t.url) || "New Tab";
-        el.onmousedown = (e) => {
-          if (e.button === 1) { post({ cmd: "close_tab", id: t.id }); e.preventDefault(); }
-          else if (e.button === 0 && !e.target.classList.contains("close")) {
-            if (e.detail === 2) post({ cmd: "toggle_maximize" });
-            else if (!t.active) post({ cmd: "switch_tab", id: t.id });
-            else post({ cmd: "drag_window" });
-          }
-        };
-        el.querySelector(".close").onclick = (e) => {
-          e.stopPropagation();
-          post({ cmd: "close_tab", id: t.id });
-        };
-        tabsEl.appendChild(el);
-      }
+      const L = s.layout || {};
+      vertical = flyout || !!L.vertical;
+      autohide = !!L.autohide;
+      document.body.classList.toggle("vertical", vertical);
+      document.body.classList.toggle("autohide", !flyout && autohide);
+      document.body.classList.toggle("collapsed", !flyout && !!L.collapsed);
+      document.body.classList.toggle("no-anim", L.animations === false);
+
+      renderTabs(s.tabs);
+      const active = s.tabs.find((t) => t.active);
 
       currentUrl = s.url || "";
       if (document.activeElement !== addr) addr.value = pretty(currentUrl);
-      field.classList.toggle("loading", loading);
+      field.classList.toggle("loading", !!(active && active.loading));
 
-      if (s.blocked !== lastBlockedCount) {
-        lastBlockedCount = s.blocked;
-        $("shield").classList.add("active-block");
-        setTimeout(() => $("shield").classList.remove("active-block"), 350);
+      const shield = $("shield");
+      if (s.blocked > lastBlocked) {
+        shield.classList.remove("bump");
+        void shield.offsetWidth;
+        shield.classList.add("bump");
       }
+      lastBlocked = s.blocked;
       $("blocked").textContent = s.blocked;
-      $("shield").className = "on" + (s.adblock ? "" : " faint");
-      $("shield").title = s.adblock
-        ? `Ad & tracker blocking on (EasyList + EasyPrivacy) — ${s.blocked} blocked`
-        : "Ad blocking loading…";
+      const siteOff = s.site_adblock === false;
+      shield.classList.toggle("on", !!s.adblock && !siteOff);
+      shield.classList.toggle("off", siteOff);
+      shield.title = !s.adblock ? "Ad blocking loading…"
+        : siteOff ? "Ad blocking is OFF for this site — click to turn it back on"
+        : `Ad & tracker blocking on — ${s.blocked} blocked. Click to turn it off for this site`;
 
       const exts = $("exts");
-      exts.innerHTML = "";
-      for (const x of s.extensions) {
-        const b = document.createElement("button");
-        b.className = "btn ext" + (x.id === s.popup ? " open" : "");
-        b.title = x.name;
-        b.innerHTML = x.icon ? '<img alt="">' : "&#x25a3;";
-        if (x.icon) b.querySelector("img").src = x.icon;
-        b.onclick = () => post({ cmd: "ext_popup", id: x.id });
-        exts.appendChild(b);
+      const sig = JSON.stringify(s.extensions.map((x) => [x.id, x.id === s.popup]));
+      if (exts.dataset.sig !== sig) {
+        exts.dataset.sig = sig;
+        exts.innerHTML = "";
+        for (const x of s.extensions) {
+          const b = document.createElement("button");
+          b.className = "btn ext" + (x.id === s.popup ? " open" : "");
+          b.title = x.name;
+          b.innerHTML = x.icon ? '<img alt="">' : "&#x25a3;";
+          if (x.icon) b.querySelector("img").src = x.icon;
+          b.onclick = () => post({ cmd: "ext_popup", id: x.id });
+          exts.appendChild(b);
+        }
       }
     },
     focusAddress() { addr.focus(); addr.select(); },
+    peek() {
+      clearTimeout(closeTimer);
+      document.body.classList.remove("closing");
+      requestAnimationFrame(() => document.body.classList.add("open"));
+    },
     setUserStyle(css) {
       let el = $("user-theme");
-      if (!el) {
-        el = document.createElement("style");
-        el.id = "user-theme";
-        document.head.appendChild(el);
-      }
+      if (!el) { el = document.createElement("style"); el.id = "user-theme"; document.head.appendChild(el); }
       el.textContent = css || "";
+      // Keep a light/dark override (if any) after the user theme.
+      const mode = $("mode-theme");
+      if (mode) document.head.appendChild(mode);
     },
   };
-  post({ cmd: "ready" });
+  post({ cmd: flyout ? "flyout_ready" : "ready" });
 </script>
 </body>
 </html>

@@ -39,7 +39,13 @@
     border-radius: 8px;
     box-shadow: 0 4px 16px var(--shadow-color);
     background: var(--surface-color);
+    transform-origin: top right;
+    animation: menu-in 240ms cubic-bezier(0.05, 0.9, 0.1, 1.05) both;
   }
+  @keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
+  .menu-container > .item { animation: item-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .menu-container > .item:nth-child(n) { animation-delay: calc(var(--i, 0) * 14ms); }
+  @keyframes item-in { from { opacity: 0; transform: translateX(6px); } }
   .item {
     display: flex;
     align-items: center;
@@ -168,6 +174,14 @@
     <span class="icon">&#x1f511;</span>
     <span class="label">Proton Pass</span>
   </div>
+  <div class="item" data-action="toggle_dark">
+    <span class="icon">&#x25d0;</span>
+    <span class="label">Light / dark mode</span>
+  </div>
+  <div class="item" data-action="toggle_vertical_tabs">
+    <span class="icon">&#x2590;</span>
+    <span class="label">Vertical tabs</span>
+  </div>
   <div class="item" data-action="devtools">
     <span class="icon">&#x2692;</span>
     <span class="label">Developer tools</span>
@@ -187,6 +201,7 @@
 </div>
 
 <script>
+  document.querySelectorAll('.menu-container > .item').forEach((el, i) => el.style.setProperty('--i', i));
   const post = (m) => window.ipc.postMessage(JSON.stringify(m));
 
   document.querySelectorAll(".item[data-action]").forEach(el => {

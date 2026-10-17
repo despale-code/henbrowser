@@ -28,6 +28,9 @@ const REFRESH_AFTER: Duration = Duration::from_secs(4 * 24 * 60 * 60);
 /// Shared engine slot; `None` until the background build finishes (requests pass meanwhile).
 pub type SharedEngine = Rc<RefCell<Option<Engine>>>;
 
+/// Sites (see `settings::site_of`) where blocking is turned off from the shield button.
+pub type SharedAllowlist = Rc<RefCell<Vec<String>>>;
+
 /// Returns the list text, downloading it first if it's missing or stale. A failed refresh falls
 /// back to the cached copy.
 fn ensure_list(dir: &Path, file: &str, url: &str) -> Option<String> {
@@ -97,6 +100,7 @@ fn request_type(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {
 pub fn install(
     controller: &ICoreWebView2Controller,
     engine: SharedEngine,
+    allowlist: SharedAllowlist,
     page_url: Rc<RefCell<String>>,
     proxy: EventLoopProxy<UserEvent>,
     tab_id: u32,
@@ -139,6 +143,9 @@ pub fn install(
                     return Ok(());
                 }
                 let source = page_url.borrow();
+                if allowlist.borrow().iter().any(|site| crate::settings::url_on_site(&source, site)) {
+                    return Ok(());
+                }
                 let Ok(request) = Request::new(&uri, &source, request_type(context), "GET") else {
                     return Ok(());
                 };
@@ -150,6 +157,7 @@ pub fn install(
                         &HSTRING::new(),
                     )?;
                     args.SetResponse(&response)?;
+                    tracing::debug!("blocked {} request {uri} (page {source})", request_type(context));
                     let _ = proxy.send_event(UserEvent::Blocked(tab_id));
                 }
                 Ok(())

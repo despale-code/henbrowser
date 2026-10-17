@@ -28,7 +28,7 @@ use tao::platform::windows::WindowBuilderExtWindows;
 use tao::window::{ResizeDirection, Window, WindowBuilder};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{AcceleratorKeyPressedEventHandler, ClearBrowsingDataCompletedHandler, FocusChangedEventHandler, TrySuspendCompletedHandler};
-use windows::core::{w, BOOL, Interface};
+use windows::core::{BOOL, Interface};
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM};
 use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -36,8 +36,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowTextW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+    EnumWindows, GetWindowTextW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_BOTTOM, HWND_TOP,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
 };
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{
@@ -49,6 +49,11 @@ use wry::{
 const TOOLBAR_H: f64 = 82.0;
 /// Height of the toolbar row alone; extension popovers open just below it, Safari-style.
 const TOOLBAR_ROW_H: f64 = 48.0;
+/// Vertical tab sidebar widths (logical px); must match toolbar.html.
+const SIDEBAR_W: f64 = 240.0;
+const SIDEBAR_COLLAPSED_W: f64 = 56.0;
+/// Hover strip left visible when the vertical tab sidebar auto-hides.
+const SIDEBAR_STRIP_W: f64 = 6.0;
 const HOME: &str = "https://duckduckgo.com/";
 const SEARCH: &str = "https://duckduckgo.com/?q=";
 const POPUP_W: f64 = 600.0;
@@ -73,6 +78,16 @@ fn theme_apply_js(css: &str) -> String {
 
 /// Initialization script for internal pages (menu, about:settings — both `about:blank`
 /// documents): applies the system theme as soon as the document exists. Web pages are skipped.
+fn internal_mode_init(mode_css: &str) -> String {
+    if mode_css.is_empty() {
+        return String::new();
+    }
+    format!(
+        "if (location.protocol === 'about:' || location.protocol === 'data:') {{ const go = () => {{ {} }}; if (document.head) go(); else document.addEventListener('DOMContentLoaded', go); }}",
+        mode_apply_js(mode_css)
+    )
+}
+
 fn theme_init_script(css: &str) -> String {
     format!(
         "if (location.protocol === 'about:' || location.protocol === 'data:') {{ const go = () => {{ {} }}; if (document.head) go(); else document.addEventListener('DOMContentLoaded', go); }}",
@@ -108,6 +123,12 @@ pub enum UserEvent {
     CssReload(String),
     /// Periodic check that suspends/unloads background tabs.
     MemoryTick,
+    /// A tab's favicon URL changed.
+    Favicon(u32, String),
+    /// A tab's page background was measured: `true` = dark.
+    PageTone(u32, bool),
+    /// chickenwm.conf changed (theme / per-app modes may have).
+    ThemeConfigChanged,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +162,22 @@ enum ToolbarCmd {
     SetMemory { memory: MemorySettings },
     /// Relaunch so browser-argument (restart) options take effect.
     RestartBrowser,
+    SetAppearance { appearance: settings::AppearanceSettings },
+    SetPrivacy { privacy: settings::PrivacySettings },
+    /// Shield button: turn the ad blocker off/on for the current site.
+    ToggleSiteAdblock,
+    /// Collapse / expand the vertical tab sidebar.
+    ToggleSidebar,
+    ToggleVerticalTabs,
+    ToggleSidebarAutohide,
+    /// Auto-hide: show / hide the sliding tab panel over the page.
+    SidebarPeek { show: bool },
+    /// The sliding tab panel finished loading.
+    FlyoutReady,
+    /// Menu: flip between light and dark (from whatever is showing now).
+    ToggleDark,
+    /// Settings page: `system` | `light` | `dark` for the browser (master theme provider).
+    SetAppMode { mode: String },
     /// Custom titlebar (the window is undecorated): move the window.
     DragWindow,
     /// Resize from the top edge/corners (`n`, `nw`, `ne`); the other edges use the native
@@ -176,6 +213,10 @@ struct Tab {
     /// Showing the built-in settings page. Only then does the tab's IPC reach the browser, so
     /// ordinary web pages can't send browser commands through `window.ipc`.
     settings_page: Rc<Cell<bool>>,
+    /// Favicon URL (empty until the page reports one).
+    favicon: String,
+    /// Measured page background (`Some(true)` = dark), for "match website colors".
+    tone: Option<bool>,
 }
 
 struct Popup {
@@ -208,6 +249,14 @@ struct Browser {
     launch_memory: MemorySettings,
     /// Current browser.css, injected into internal pages (menu, about:settings).
     user_css: String,
+    /// ChickenWM theme (accent + mode) the light/dark override palettes are built from.
+    system_theme: chickenwm_core::theme::ThemeConfig,
+    /// Light/dark override CSS last sent to the chrome ("" = follow browser.css).
+    mode_css: String,
+    allowlist: adblock_filter::SharedAllowlist,
+    /// Auto-hide tab panel (toolbar.html in flyout mode), created on first hover.
+    flyout: Option<WebView>,
+    flyout_visible: bool,
 }
 
 /// Every webview on the shared profile must be created with identical environment options
@@ -217,6 +266,145 @@ fn profile_builder<'a>(context: &'a mut WebContext, memory: &MemorySettings) -> 
     WebViewBuilder::new_with_web_context(context)
         .with_browser_extensions_enabled(true)
         .with_additional_browser_args(memory.browser_args())
+}
+
+/// Reports favicon changes as `UserEvent::Favicon`.
+fn install_favicon(controller: &ICoreWebView2Controller, tab: u32, proxy: EventLoopProxy<UserEvent>) {
+    use webview2_com::FaviconChangedEventHandler;
+    let Ok(core) = (unsafe { controller.CoreWebView2() }) else { return };
+    let Ok(core15) = core.cast::<ICoreWebView2_15>() else { return };
+    let mut token = 0i64;
+    unsafe {
+        let _ = core15.add_FaviconChanged(
+            &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+                if let Some(c15) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) {
+                    let mut uri = windows::core::PWSTR::null();
+                    c15.FaviconUri(&mut uri)?;
+                    let _ = proxy.send_event(UserEvent::Favicon(tab, webview2_com::take_pwstr(uri)));
+                }
+                Ok(())
+            })),
+            &mut token,
+        );
+    }
+}
+
+/// Evaluates to `true` (dark), `false` (light) for the page's background: the first opaque
+/// background of `<body>` / `<html>`, else of the element in the middle of the viewport.
+const PAGE_TONE_JS: &str = r#"(() => {
+  const parse = (c) => {
+    const m = c && c.match(/rgba?\(([^)]+)\)/);
+    if (!m) return null;
+    const p = m[1].split(/[ ,/]+/).filter(Boolean).map(parseFloat);
+    return p.length > 3 && p[3] < 0.5 ? null : p;
+  };
+  let c = null;
+  for (const el of [document.body, document.documentElement]) {
+    if (el) { c = parse(getComputedStyle(el).backgroundColor); if (c) break; }
+  }
+  for (let e = document.elementFromPoint(innerWidth / 2, innerHeight / 2); !c && e; e = e.parentElement) {
+    c = parse(getComputedStyle(e).backgroundColor);
+  }
+  if (!c) c = [255, 255, 255];
+  return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 < 0.45;
+})()"#;
+
+/// Profile-wide preferences: the color scheme pages see (`prefers-color-scheme`) and Edge's
+/// tracking prevention level.
+fn apply_profile_prefs(controller: &ICoreWebView2Controller, dark: Option<bool>, tracking: &str) {
+    unsafe {
+        let Ok(profile) = controller.CoreWebView2().and_then(|c| c.cast::<ICoreWebView2_13>()).and_then(|c| c.Profile()) else {
+            return;
+        };
+        let scheme = match dark {
+            Some(true) => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+            Some(false) => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+            None => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+        };
+        let _ = profile.SetPreferredColorScheme(scheme);
+        if let Ok(p3) = profile.cast::<ICoreWebView2Profile3>() {
+            let level = match tracking {
+                "none" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_NONE,
+                "balanced" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BALANCED,
+                "strict" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_STRICT,
+                _ => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BASIC,
+            };
+            let _ = p3.SetPreferredTrackingPreventionLevel(level);
+        }
+    }
+}
+
+/// `:root { … }` override for the chrome in `mode`, built from the ChickenWM accent.
+fn mode_css(theme: &chickenwm_core::theme::ThemeConfig, mode: chickenwm_core::theme::ThemeMode) -> String {
+    let palette = theme.palette(mode);
+    let mut css = String::from(":root {");
+    for (k, v) in palette.css_vars("browser.css") {
+        css.push_str(&format!(" {k}: {v};"));
+    }
+    css.push_str(&format!(" color-scheme: {}; }}", mode.as_str()));
+    css
+}
+
+/// JS that installs the light/dark override as `<style id="mode-theme">` (after the user theme).
+fn mode_apply_js(css: &str) -> String {
+    format!(
+        "(function(css){{let el=document.getElementById('mode-theme');if(!el){{el=document.createElement('style');el.id='mode-theme';(document.head||document.documentElement).appendChild(el);}}el.textContent=css;}})({});",
+        serde_json::to_string(css).unwrap_or_default()
+    )
+}
+
+/// Logs failed navigations (with WebView2's error status), and with `CHICKENBROWSER_DEBUG` set,
+/// every JavaScript exception and console error a page produces.
+fn install_diagnostics(controller: &ICoreWebView2Controller, tab: u32) {
+    use webview2_com::{
+        CallDevToolsProtocolMethodCompletedHandler, DevToolsProtocolEventReceivedEventHandler,
+        NavigationCompletedEventHandler,
+    };
+    let Ok(core) = (unsafe { controller.CoreWebView2() }) else { return };
+    let mut token = 0i64;
+    unsafe {
+        let _ = core.add_NavigationCompleted(
+            &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let mut ok = BOOL(0);
+                    args.IsSuccess(&mut ok)?;
+                    if !ok.as_bool() {
+                        let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
+                        args.WebErrorStatus(&mut status)?;
+                        tracing::warn!("tab {tab}: navigation failed (WebErrorStatus {})", status.0);
+                    }
+                }
+                Ok(())
+            })),
+            &mut token,
+        );
+    }
+    if std::env::var_os("CHICKENBROWSER_DEBUG").is_none() {
+        return;
+    }
+    for (event, enable) in [("Runtime.exceptionThrown", "Runtime.enable"), ("Log.entryAdded", "Log.enable")] {
+        unsafe {
+            if let Ok(receiver) = core.GetDevToolsProtocolEventReceiver(&windows::core::HSTRING::from(event)) {
+                let _ = receiver.add_DevToolsProtocolEventReceived(
+                    &DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                        if let Some(args) = args {
+                            let mut json = windows::core::PWSTR::null();
+                            args.ParameterObjectAsJson(&mut json)?;
+                            let text = webview2_com::take_pwstr(json);
+                            tracing::warn!("tab {tab} {event}: {}", text.chars().take(600).collect::<String>());
+                        }
+                        Ok(())
+                    })),
+                    &mut token,
+                );
+            }
+            let _ = core.CallDevToolsProtocolMethod(
+                &windows::core::HSTRING::from(enable),
+                &windows::core::HSTRING::from("{}"),
+                &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(()))),
+            );
+        }
+    }
 }
 
 fn show_settings_page(webview: &WebView) {
@@ -363,20 +551,180 @@ impl Browser {
         (size.width as f64 / scale, size.height as f64 / scale)
     }
 
-    fn content_rect(&self) -> Rect {
-        let (w, h) = self.logical_size();
-        Rect {
-            position: LogicalPosition::new(0.0, TOOLBAR_H).into(),
-            size: LogicalSize::new(w, (h - TOOLBAR_H).max(1.0)).into(),
+    /// Width of the vertical tab sidebar (0 with horizontal tabs).
+    fn sidebar_w(&self) -> f64 {
+        let a = &self.settings.appearance;
+        match (a.vertical_tabs, a.sidebar_collapsed) {
+            (false, _) => 0.0,
+            _ if a.sidebar_autohide => SIDEBAR_STRIP_W,
+            (true, true) => SIDEBAR_COLLAPSED_W,
+            (true, false) => SIDEBAR_W,
         }
     }
 
+    fn content_rect(&self) -> Rect {
+        let (w, h) = self.logical_size();
+        let (left, top) = if self.settings.appearance.vertical_tabs {
+            (self.sidebar_w(), TOOLBAR_ROW_H)
+        } else {
+            (0.0, TOOLBAR_H)
+        };
+        Rect {
+            position: LogicalPosition::new(left, top).into(),
+            size: LogicalSize::new((w - left).max(1.0), (h - top).max(1.0)).into(),
+        }
+    }
+
+    /// The toolbar covers the whole window, behind the page: it draws the toolbar row and the
+    /// tab strip or vertical tab sidebar around the content area.
     fn toolbar_rect(&self) -> Rect {
-        let (w, _) = self.logical_size();
+        let (w, h) = self.logical_size();
         Rect {
             position: LogicalPosition::new(0.0, 0.0).into(),
-            size: LogicalSize::new(w, TOOLBAR_H).into(),
+            size: LogicalSize::new(w, h).into(),
         }
+    }
+
+    fn flyout_rect(&self) -> Rect {
+        let (_, h) = self.logical_size();
+        Rect {
+            position: LogicalPosition::new(0.0, TOOLBAR_ROW_H).into(),
+            size: LogicalSize::new(SIDEBAR_W, (h - TOOLBAR_ROW_H).max(1.0)).into(),
+        }
+    }
+
+    /// Shows / hides the auto-hide tab panel. It's a small separate webview so it can slide
+    /// *over* the page (the toolbar itself sits behind it); kept alive once created.
+    fn sidebar_peek(&mut self, show: bool) {
+        if !show {
+            if let Some(f) = &self.flyout {
+                let _ = f.set_visible(false);
+            }
+            self.flyout_visible = false;
+            return;
+        }
+        if !(self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide) {
+            return;
+        }
+        if self.flyout.is_none() {
+            let proxy = self.proxy.clone();
+            let rect = self.flyout_rect();
+            let built = profile_builder(&mut self.web_context, &self.settings.memory)
+                .with_initialization_script("window.__CHICKEN_FLYOUT = true;")
+                .with_html(include_str!("toolbar.html"))
+                .with_transparent(true)
+                .with_background_color((0, 0, 0, 0))
+                .with_bounds(rect)
+                .with_ipc_handler(move |req| {
+                    let _ = proxy.send_event(UserEvent::Ipc(req.body().clone()));
+                })
+                .build_as_child(&self.window);
+            match built {
+                Ok(w) => self.flyout = Some(w),
+                Err(e) => {
+                    tracing::warn!("couldn't create the tab panel: {e}");
+                    return;
+                }
+            }
+        }
+        let rect = self.flyout_rect();
+        if let Some(f) = &self.flyout {
+            let _ = f.set_bounds(rect);
+            let _ = f.set_visible(true);
+            let hwnd = f.hwnd();
+            unsafe {
+                let _ = SetWindowPos(HWND(hwnd.0 as _), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            let _ = f.evaluate_script("window.hb && hb.peek && hb.peek()");
+        }
+        self.flyout_visible = true;
+        self.sync_toolbar();
+    }
+
+    /// Keeps the toolbar under the page, popups and menus (it's full-window now).
+    fn keep_toolbar_behind(&self) {
+        let hwnd = self.toolbar.hwnd();
+        unsafe {
+            let _ = SetWindowPos(HWND(hwnd.0 as _), Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+
+    /// A live light/dark override for the chrome: only "match website colors" makes one (the
+    /// page's own tone). Otherwise `None`: browser.css already carries the palette the master
+    /// theme provider picked for the browser (`app_modes = browser:…`).
+    fn effective_mode(&self) -> Option<chickenwm_core::theme::ThemeMode> {
+        use chickenwm_core::theme::ThemeMode;
+        if self.settings.appearance.match_website {
+            if let Some(dark) = self.tabs.get(self.active).and_then(|t| t.tone) {
+                let page = if dark { ThemeMode::Dark } else { ThemeMode::Light };
+                // No override needed when the page already matches the browser's own mode.
+                if page != self.system_theme.mode_for("browser") {
+                    return Some(page);
+                }
+            }
+        }
+        None
+    }
+
+    /// Sets the browser's light/dark mode through the master theme provider.
+    fn set_browser_mode(&mut self, mode: chickenwm_core::theme::AppMode) {
+        match chickenwm_core::theme::set_app_mode("browser", mode) {
+            Ok(theme) => self.system_theme = theme,
+            Err(e) => tracing::warn!("couldn't save the browser's theme mode: {e}"),
+        }
+        self.apply_profile();
+        self.refresh_chrome_theme();
+        self.push_settings_state();
+    }
+
+    /// Sends the light/dark override to the toolbar, menu and settings pages if it changed.
+    fn refresh_chrome_theme(&mut self) {
+        let css = self.effective_mode().map(|m| mode_css(&self.system_theme, m)).unwrap_or_default();
+        if css == self.mode_css {
+            return;
+        }
+        let script = mode_apply_js(&css);
+        let _ = self.toolbar.evaluate_script(&script);
+        if let Some(f) = &self.flyout {
+            let _ = f.evaluate_script(&script);
+        }
+        for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
+            let _ = tab.webview.evaluate_script(&script);
+        }
+        if let Some(popup) = self.popup.as_ref().filter(|p| p.extension_id == "menu") {
+            let _ = popup.webview.evaluate_script(&script);
+        }
+        let bg = if css.is_empty() { chrome_bg(&self.user_css) } else { chrome_bg(&css) };
+        let _ = self.toolbar.set_background_color(bg);
+        self.mode_css = css;
+    }
+
+    /// Color scheme websites see, from the configured theme (never from page tone, which would
+    /// feed back into itself).
+    fn apply_profile(&self) {
+        let dark = Some(self.system_theme.mode_for("browser") == chickenwm_core::theme::ThemeMode::Dark);
+        if let Some(tab) = self.tabs.first() {
+            apply_profile_prefs(&tab.webview.controller(), dark, &self.settings.privacy.tracking_prevention);
+        }
+    }
+
+    /// Measures the active page's background for "match website colors".
+    fn measure_tone(&self) {
+        if !self.settings.appearance.match_website {
+            return;
+        }
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.settings_page.get() || tab.discarded {
+            return;
+        }
+        let (id, proxy) = (tab.id, self.proxy.clone());
+        let _ = tab.webview.evaluate_script_with_callback(PAGE_TONE_JS, move |result| {
+            match result.trim() {
+                "true" => { let _ = proxy.send_event(UserEvent::PageTone(id, true)); }
+                "false" => { let _ = proxy.send_event(UserEvent::PageTone(id, false)); }
+                _ => {}
+            }
+        });
     }
 
     fn popup_rect(&self) -> Rect {
@@ -392,7 +740,7 @@ impl Browser {
     fn menu_rect(&self) -> Rect {
         let (w, h) = self.logical_size();
         let width = 260.0f64.min(w - 20.0);
-        let height = 370.0f64.min((h - TOOLBAR_ROW_H - 10.0).max(100.0));
+        let height = 440.0f64.min((h - TOOLBAR_ROW_H - 10.0).max(100.0));
         Rect {
             position: LogicalPosition::new((w - width - 8.0).max(0.0), TOOLBAR_ROW_H).into(),
             size: LogicalSize::new(width, height).into(),
@@ -401,6 +749,10 @@ impl Browser {
 
     fn layout(&self) {
         let _ = self.toolbar.set_bounds(self.toolbar_rect());
+        self.keep_toolbar_behind();
+        if let (Some(f), true) = (&self.flyout, self.flyout_visible) {
+            let _ = f.set_bounds(self.flyout_rect());
+        }
         if let Some(tab) = self.tabs.get(self.active) {
             let _ = tab.webview.set_bounds(self.content_rect());
         }
@@ -419,14 +771,29 @@ impl Browser {
         let state = json!({
             "tabs": self.tabs.iter().enumerate().map(|(i, t)| json!({
                 "id": t.id, "title": t.title, "url": t.url, "loading": t.loading, "active": i == self.active,
+                "icon": t.favicon, "asleep": t.suspended || t.discarded,
             })).collect::<Vec<_>>(),
+            "layout": {
+                "vertical": self.settings.appearance.vertical_tabs,
+                "autohide": self.settings.appearance.sidebar_autohide,
+                "collapsed": self.settings.appearance.sidebar_collapsed,
+                "sidebar": self.sidebar_w(),
+                "animations": self.settings.appearance.animations,
+            },
+            "site_adblock": active
+                .and_then(|t| settings::site_of(&t.url))
+                .map(|site| !self.allowlist.borrow().contains(&site)),
             "url": active.map(|t| t.url.as_str()).unwrap_or(""),
             "blocked": self.blocked,
             "adblock": self.engine.borrow().is_some(),
             "extensions": self.extensions,
             "popup": self.popup.as_ref().map(|p| p.extension_id.as_str()),
         });
-        let _ = self.toolbar.evaluate_script(&format!("window.hb && hb.render({state})"));
+        let script = format!("window.hb && hb.render({state})");
+        let _ = self.toolbar.evaluate_script(&script);
+        if let Some(f) = &self.flyout {
+            let _ = f.evaluate_script(&script);
+        }
         let title = active
             .map(|t| if t.title.is_empty() { t.url.clone() } else { t.title.clone() })
             .unwrap_or_default();
@@ -450,6 +817,7 @@ impl Browser {
 
         let mut builder = profile_builder(&mut self.web_context, &self.settings.memory)
             .with_initialization_script(theme_init_script(&self.user_css))
+            .with_initialization_script(internal_mode_init(&self.mode_css))
             .with_bounds(bounds)
             .with_devtools(true)
             .with_ipc_handler(move |req| {
@@ -464,8 +832,13 @@ impl Browser {
                 let started = matches!(event, PageLoadEvent::Started);
                 let _ = p_load.send_event(UserEvent::PageLoad { tab: id, url, started });
             })
-            .with_new_window_req_handler(move |url, _features| {
-                // target=_blank, window.open, extension-opened pages: open as a tab.
+            .with_new_window_req_handler(move |url, features| {
+                // Real popups (window.open with a size or position: sign-in, payment, exam
+                // windows) open as proper WebView2 popups so window.opener and form POSTs keep
+                // working. Ordinary target=_blank links open as tabs.
+                if features.size.is_some() || features.position.is_some() {
+                    return NewWindowResponse::Allow;
+                }
                 let _ = p_new.send_event(UserEvent::OpenTab(url));
                 NewWindowResponse::Deny
             });
@@ -489,10 +862,12 @@ impl Browser {
             }
         };
         let controller = webview.controller();
-        if let Err(e) = adblock_filter::install(&controller, self.engine.clone(), page_url.clone(), self.proxy.clone(), id) {
+        if let Err(e) = adblock_filter::install(&controller, self.engine.clone(), self.allowlist.clone(), page_url.clone(), self.proxy.clone(), id) {
             tracing::warn!("adblock hook failed for tab {id}: {e}");
         }
         install_shortcuts(&controller, self.proxy.clone(), true);
+        install_diagnostics(&controller, id);
+        install_favicon(&controller, id, self.proxy.clone());
         if !self.extensions_loaded {
             self.extensions_loaded = true;
         }
@@ -509,9 +884,16 @@ impl Browser {
             suspended: false,
             discarded: false,
             settings_page,
+            favicon: String::new(),
+            tone: None,
         });
         self.active = self.tabs.len() - 1;
+        if self.tabs.len() == 1 {
+            self.apply_profile();
+        }
+        self.keep_toolbar_behind();
         self.sync_toolbar();
+        self.refresh_chrome_theme();
     }
 
     fn switch_to(&mut self, index: usize) {
@@ -524,6 +906,8 @@ impl Browser {
         self.active = index;
         self.bring_to_foreground(index);
         self.sync_toolbar();
+        self.refresh_chrome_theme();
+        self.measure_tone();
     }
 
     /// Hides a tab that is no longer the visible one and starts its memory-saving clock.
@@ -618,6 +1002,10 @@ impl Browser {
         let state = json!({
             "search_engine": self.settings.search_engine,
             "memory": self.settings.memory,
+            "appearance": self.settings.appearance,
+            "system_dark": self.system_theme.mode == chickenwm_core::theme::ThemeMode::Dark,
+            "app_mode": self.system_theme.app_mode("browser").as_str(),
+            "privacy": self.settings.privacy,
             "restart_needed": self.launch_memory.needs_restart(&self.settings.memory),
             "usage_mb": usage.map(|(bytes, _)| bytes / (1024 * 1024)),
             "processes": usage.map(|(_, n)| n),
@@ -628,6 +1016,40 @@ impl Browser {
         for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
             let _ = tab.webview.evaluate_script(&format!("window.hbSettings && hbSettings.render({state})"));
         }
+    }
+
+    fn set_appearance(&mut self, appearance: settings::AppearanceSettings) {
+        let relayout = appearance.vertical_tabs != self.settings.appearance.vertical_tabs
+            || appearance.sidebar_collapsed != self.settings.appearance.sidebar_collapsed;
+        let theme_changed = appearance.theme != self.settings.appearance.theme;
+        self.settings.appearance = appearance;
+        self.save_settings();
+        if relayout {
+            self.layout();
+        }
+        self.sync_toolbar();
+        if theme_changed {
+            self.apply_profile();
+        }
+        self.refresh_chrome_theme();
+        self.measure_tone();
+        self.push_settings_state();
+    }
+
+    fn toggle_site_adblock(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(site) = settings::site_of(&tab.url) else { return };
+        let list = &mut self.settings.privacy.adblock_allowlist;
+        if let Some(i) = list.iter().position(|s| *s == site) {
+            list.remove(i);
+        } else {
+            list.push(site);
+        }
+        *self.allowlist.borrow_mut() = list.clone();
+        self.save_settings();
+        let _ = self.tabs[self.active].webview.reload();
+        self.sync_toolbar();
+        self.push_settings_state();
     }
 
     fn save_settings(&self) {
@@ -753,6 +1175,7 @@ impl Browser {
         let built = profile_builder(&mut self.web_context, &self.settings.memory)
             .with_html(include_str!("menu.html"))
             .with_initialization_script(theme_init_script(&self.user_css))
+            .with_initialization_script(internal_mode_init(&self.mode_css))
             .with_bounds(bounds)
             .with_devtools(true)
             .with_focused(true)
@@ -819,6 +1242,9 @@ impl Browser {
                 match cmd {
                     ToolbarCmd::Ready => {
                         self.sync_toolbar();
+                        // The toolbar (re)loaded: resend the light/dark override.
+                        self.mode_css = String::from("\u{1}");
+                        self.refresh_chrome_theme();
                         if let Ok(css) = std::fs::read_to_string(&self.paths.css) {
                             let script = format!("window.hb && hb.setUserStyle({});", serde_json::to_string(&css).unwrap_or_default());
                             let _ = self.toolbar.evaluate_script(&script);
@@ -971,6 +1397,62 @@ impl Browser {
                         self.save_settings();
                     }
                     ToolbarCmd::SettingsReady => self.push_settings_state(),
+                    ToolbarCmd::SetAppearance { appearance } => self.set_appearance(appearance),
+                    ToolbarCmd::SetPrivacy { privacy } => {
+                        *self.allowlist.borrow_mut() = privacy.adblock_allowlist.clone();
+                        self.settings.privacy = privacy;
+                        self.save_settings();
+                        self.apply_profile();
+                        self.sync_toolbar();
+                        self.push_settings_state();
+                    }
+                    ToolbarCmd::ToggleSiteAdblock => self.toggle_site_adblock(),
+                    ToolbarCmd::ToggleSidebar => {
+                        let mut a = self.settings.appearance.clone();
+                        a.sidebar_collapsed = !a.sidebar_collapsed;
+                        self.set_appearance(a);
+                    }
+                    ToolbarCmd::ToggleDark => {
+                        self.close_popup();
+                        use chickenwm_core::theme::{AppMode, ThemeMode};
+                        let dark_now = self.effective_mode().unwrap_or(self.system_theme.mode_for("browser")) == ThemeMode::Dark;
+                        // An explicit choice beats "match website colors".
+                        if self.settings.appearance.match_website {
+                            let mut a = self.settings.appearance.clone();
+                            a.match_website = false;
+                            self.set_appearance(a);
+                        }
+                        self.set_browser_mode(if dark_now { AppMode::Light } else { AppMode::Dark });
+                    }
+                    ToolbarCmd::SidebarPeek { show } => self.sidebar_peek(show),
+                    ToolbarCmd::SetAppMode { mode } => {
+                        if let Some(m) = chickenwm_core::theme::AppMode::parse(&mode) {
+                            self.set_browser_mode(m);
+                        }
+                    }
+                    ToolbarCmd::FlyoutReady => {
+                        if let Some(f) = &self.flyout {
+                            let css = serde_json::to_string(&self.user_css).unwrap_or_default();
+                            let _ = f.evaluate_script(&format!("window.hb && hb.setUserStyle({css});"));
+                            if !self.mode_css.is_empty() {
+                                let _ = f.evaluate_script(&mode_apply_js(&self.mode_css));
+                            }
+                            let _ = f.evaluate_script("window.hb && hb.peek && hb.peek()");
+                        }
+                        self.sync_toolbar();
+                    }
+                    ToolbarCmd::ToggleSidebarAutohide => {
+                        let mut a = self.settings.appearance.clone();
+                        a.sidebar_autohide = !a.sidebar_autohide;
+                        self.sidebar_peek(false);
+                        self.set_appearance(a);
+                    }
+                    ToolbarCmd::ToggleVerticalTabs => {
+                        self.close_popup();
+                        let mut a = self.settings.appearance.clone();
+                        a.vertical_tabs = !a.vertical_tabs;
+                        self.set_appearance(a);
+                    }
                     ToolbarCmd::SetMemoryPreset { preset } => {
                         if let Some(memory) = MemorySettings::preset(&preset) {
                             self.apply_memory_settings(memory);
@@ -1042,6 +1524,9 @@ impl Browser {
                 // Extensions install asynchronously; list them as pages finish loading.
                 if !started {
                     self.refresh_extensions();
+                    if self.tab_index(tab) == Some(self.active) {
+                        self.measure_tone();
+                    }
                 }
             }
             UserEvent::OpenTab(url) => self.open_tab(&url),
@@ -1108,6 +1593,9 @@ impl Browser {
                 tracing::info!("applying hot-reloaded browser.css");
                 let script = format!("window.hb && hb.setUserStyle({});", serde_json::to_string(&css).unwrap_or_default());
                 let _ = self.toolbar.evaluate_script(&script);
+                if let Some(f) = &self.flyout {
+                    let _ = f.evaluate_script(&script);
+                }
                 let page_script = theme_apply_js(&css);
                 for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
                     let _ = tab.webview.evaluate_script(&page_script);
@@ -1119,7 +1607,33 @@ impl Browser {
                 let _ = self.toolbar.set_background_color((r, g, b, a));
                 self.user_css = css;
             }
+            UserEvent::ThemeConfigChanged => {
+                if let Ok((_, cfg)) = chickenwm_core::config::load_or_init_config() {
+                    if cfg.theme != self.system_theme {
+                        self.system_theme = cfg.theme;
+                        self.apply_profile();
+                        self.refresh_chrome_theme();
+                        self.push_settings_state();
+                    }
+                }
+            }
+            UserEvent::Favicon(id, uri) => {
+                if let Some(i) = self.tab_index(id) {
+                    self.tabs[i].favicon = uri;
+                    self.sync_toolbar();
+                }
+            }
+            UserEvent::PageTone(id, dark) => {
+                if let Some(i) = self.tab_index(id) {
+                    self.tabs[i].tone = Some(dark);
+                    if i == self.active {
+                        self.refresh_chrome_theme();
+                    }
+                }
+            }
             UserEvent::MemoryTick => {
+                // Pages can switch their own theme; keep "match website colors" in step.
+                self.measure_tone();
                 self.memory_tick();
                 if self.tabs.iter().any(|t| t.settings_page.get()) {
                     self.push_settings_state();
@@ -1184,8 +1698,18 @@ fn main() -> anyhow::Result<()> {
     if restarting {
         args.remove(0);
     }
+    // Developer option: CHICKENBROWSER_PROFILE=<folder> runs a separate instance with its own
+    // profile (and its own single-instance lock) next to your everyday browser.
+    let isolated_root = std::env::var_os("CHICKENBROWSER_PROFILE").map(PathBuf::from);
+    let mutex_name = windows::core::HSTRING::from(match &isolated_root {
+        Some(dir) => format!(
+            "Local\\chickenbrowser-{}",
+            dir.to_string_lossy().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64))
+        ),
+        None => "Local\\chickenbrowser-single-instance".to_string(),
+    });
     let _instance_mutex = unsafe {
-        let mutex = CreateMutexW(None, true, w!("Local\\chickenbrowser-single-instance"))?;
+        let mutex = CreateMutexW(None, true, &mutex_name)?;
         if GetLastError() == ERROR_ALREADY_EXISTS && restarting {
             // WAIT_ABANDONED (old process exited holding it) also hands us ownership.
             let _ = WaitForSingleObject(mutex, 15_000);
@@ -1197,13 +1721,13 @@ fn main() -> anyhow::Result<()> {
         mutex
     };
 
-    let root = config_dir().join("chickenbrowser");
+    let root = isolated_root.unwrap_or_else(|| config_dir().join("chickenbrowser"));
     let css_path = config_dir().join("browser.css");
     if !css_path.exists() {
         let _ = std::fs::write(&css_path, include_str!("browser.css"));
         // Start from the system theme rather than the stock palette.
         if let Ok((_, cfg)) = chickenwm_core::config::load_or_init_config() {
-            let palette = chickenwm_core::theme::Palette::new(cfg.theme.accent, cfg.theme.mode);
+            let palette = cfg.theme.palette(cfg.theme.mode);
             let _ = chickenwm_core::theme::apply_palette_to_file(&palette, &css_path);
         }
     }
@@ -1218,7 +1742,16 @@ fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&paths.extensions)?;
     // Before WebView2 installs them, so Proton Pass gets its store id (see `ensure_store_keys`).
     extensions::ensure_store_keys(&paths.extensions);
-    let browser_settings = settings::load(&root);
+    let mut browser_settings = settings::load(&root);
+    // One-time move of the old browser-only light/dark choice into the master theme provider.
+    if let Some(mode) = chickenwm_core::theme::AppMode::parse(&browser_settings.appearance.theme)
+        .filter(|m| *m != chickenwm_core::theme::AppMode::System)
+    {
+        if chickenwm_core::theme::set_app_mode("browser", mode).is_ok() {
+            browser_settings.appearance.theme = "system".into();
+            settings::save(&root, &browser_settings);
+        }
+    }
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
@@ -1226,11 +1759,16 @@ fn main() -> anyhow::Result<()> {
     // Hot-reload ~/.config/chickenwm/browser.css whenever it is saved
     let proxy_css = proxy.clone();
     let _css_watcher = chickenwm_core::css::spawn_config_watcher(move |ev| {
-        if let chickenwm_core::css::ConfigWatchEvent::CssChanged { file_name, path } = ev {
-            if file_name.eq_ignore_ascii_case("browser.css") {
-                if let Ok(css) = std::fs::read_to_string(&path) {
-                    let _ = proxy_css.send_event(UserEvent::CssReload(css));
+        match ev {
+            chickenwm_core::css::ConfigWatchEvent::CssChanged { file_name, path } => {
+                if file_name.eq_ignore_ascii_case("browser.css") {
+                    if let Ok(css) = std::fs::read_to_string(&path) {
+                        let _ = proxy_css.send_event(UserEvent::CssReload(css));
+                    }
                 }
+            }
+            chickenwm_core::css::ConfigWatchEvent::HyprConfChanged(_) => {
+                let _ = proxy_css.send_event(UserEvent::ThemeConfigChanged);
             }
         }
     });
@@ -1261,7 +1799,7 @@ fn main() -> anyhow::Result<()> {
         .with_background_color(chrome_bg(&user_css))
         .with_bounds(Rect {
             position: LogicalPosition::new(0.0, 0.0).into(),
-            size: LogicalSize::new(width, TOOLBAR_H).into(),
+            size: LogicalSize::new(width, window.inner_size().height as f64 / scale).into(),
         })
         .with_ipc_handler(move |request| {
             let _ = toolbar_proxy.send_event(UserEvent::Ipc(request.body().clone()));
@@ -1296,8 +1834,13 @@ fn main() -> anyhow::Result<()> {
         extensions_loaded: false,
         paths,
         launch_memory: browser_settings.memory.clone(),
+        allowlist: Rc::new(RefCell::new(browser_settings.privacy.adblock_allowlist.clone())),
         settings: browser_settings,
         user_css,
+        system_theme: chickenwm_core::config::load_or_init_config().map(|(_, c)| c.theme).unwrap_or_default(),
+        mode_css: String::new(),
+        flyout: None,
+        flyout_visible: false,
     };
     adblock_filter::spawn_engine_loader(browser.paths.adblock.clone(), proxy.clone());
     if args.is_empty() {
