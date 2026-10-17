@@ -40,6 +40,18 @@ pub struct AppearanceSettings {
     pub sidebar_autohide: bool,
     /// UI motion (tab open/close, sliding highlight, theme cross-fades).
     pub animations: bool,
+    /// Soft, slowly drifting gradient behind the chrome, built from the ChickenWM theme colors.
+    pub gradient: bool,
+    /// 0–100.
+    pub gradient_strength: u8,
+    /// Film-grain texture over the chrome (like Zen).
+    pub noise: bool,
+    /// 0–100.
+    pub noise_strength: u8,
+    /// The page's colors bleed into the chrome as slow, blurred glows.
+    pub ambient: bool,
+    /// 0–100.
+    pub ambient_strength: u8,
 }
 
 impl Default for AppearanceSettings {
@@ -51,6 +63,12 @@ impl Default for AppearanceSettings {
             sidebar_collapsed: false,
             sidebar_autohide: false,
             animations: true,
+            gradient: true,
+            gradient_strength: 55,
+            noise: true,
+            noise_strength: 35,
+            ambient: true,
+            ambient_strength: 60,
         }
     }
 }

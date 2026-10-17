@@ -127,6 +127,8 @@ pub enum UserEvent {
     Favicon(u32, String),
     /// A tab's page background was measured: `true` = dark.
     PageTone(u32, bool),
+    /// A tab's page colors were sampled for the ambient glow.
+    PageAmbient(u32, Vec<[u8; 3]>),
     /// chickenwm.conf changed (theme / per-app modes may have).
     ThemeConfigChanged,
 }
@@ -217,6 +219,8 @@ struct Tab {
     favicon: String,
     /// Measured page background (`Some(true)` = dark), for "match website colors".
     tone: Option<bool>,
+    /// Colors sampled from the page (dominant first), bled into the chrome as ambient glow.
+    ambient: Vec<[u8; 3]>,
 }
 
 struct Popup {
@@ -307,6 +311,54 @@ const PAGE_TONE_JS: &str = r#"(() => {
   }
   if (!c) c = [255, 255, 255];
   return (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 < 0.45;
+})()"#;
+
+/// Evaluates to up to five `[r, g, b]` colors that represent the page, dominant first: the
+/// `theme-color`, the backgrounds along the edges next to the chrome (where a bleed reads as a
+/// continuation of the page), the middle, and the link color as an accent. Near-duplicates are
+/// dropped. Cross-origin images can't be read, so only CSS colors are used.
+const PAGE_AMBIENT_JS: &str = r#"(() => {
+  try {
+    const parse = (c) => {
+      const m = c && c.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const p = m[1].split(/[ ,/]+/).filter(Boolean).map(parseFloat);
+      return p.length > 3 && p[3] < 0.4 ? null : p.slice(0, 3).map(Math.round);
+    };
+    const bgAt = (x, y) => {
+      for (let e = document.elementFromPoint(x, y); e; e = e.parentElement) {
+        const c = parse(getComputedStyle(e).backgroundColor);
+        if (c) return c;
+      }
+      return null;
+    };
+    const out = [];
+    const add = (c) => {
+      if (!c) return;
+      for (const o of out) {
+        if (Math.abs(o[0] - c[0]) + Math.abs(o[1] - c[1]) + Math.abs(o[2] - c[2]) < 36) return;
+      }
+      out.push(c);
+    };
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && meta.content && document.body) {
+      const probe = document.createElement("i");
+      probe.style.color = meta.content;
+      document.body.appendChild(probe);
+      add(parse(getComputedStyle(probe).color));
+      probe.remove();
+    }
+    const W = innerWidth, H = innerHeight;
+    for (const [x, y] of [[W * 0.5, 3], [W * 0.15, 3], [W * 0.85, 3], [3, H * 0.3], [3, H * 0.7],
+                          [W * 0.5, H * 0.45], [W * 0.5, H - 3]]) add(bgAt(x, y));
+    const link = document.querySelector("a[href]");
+    if (link) add(parse(getComputedStyle(link).color));
+    for (const el of [document.body, document.documentElement]) {
+      if (el) add(parse(getComputedStyle(el).backgroundColor));
+    }
+    if (!out.length) out.push([255, 255, 255]);
+    return out.slice(0, 5);
+  } catch (_) { return []; }
 })()"#;
 
 /// Profile-wide preferences: the color scheme pages see (`prefers-color-scheme`) and Edge's
@@ -710,6 +762,8 @@ impl Browser {
 
     /// Measures the active page's background for "match website colors".
     fn measure_tone(&self) {
+        // Same moments (load, switch, settings change, periodic tick) feed the ambient glow.
+        self.measure_ambient();
         if !self.settings.appearance.match_website {
             return;
         }
@@ -723,6 +777,23 @@ impl Browser {
                 "true" => { let _ = proxy.send_event(UserEvent::PageTone(id, true)); }
                 "false" => { let _ = proxy.send_event(UserEvent::PageTone(id, false)); }
                 _ => {}
+            }
+        });
+    }
+
+    /// Samples the active page's colors for the ambient glow.
+    fn measure_ambient(&self) {
+        if !self.settings.appearance.ambient {
+            return;
+        }
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.settings_page.get() || tab.discarded {
+            return;
+        }
+        let (id, proxy) = (tab.id, self.proxy.clone());
+        let _ = tab.webview.evaluate_script_with_callback(PAGE_AMBIENT_JS, move |result| {
+            if let Ok(colors) = serde_json::from_str::<Vec<[u8; 3]>>(result.trim()) {
+                let _ = proxy.send_event(UserEvent::PageAmbient(id, colors));
             }
         });
     }
@@ -780,6 +851,19 @@ impl Browser {
                 "sidebar": self.sidebar_w(),
                 "animations": self.settings.appearance.animations,
             },
+            "fx": {
+                "gradient": self.settings.appearance.gradient,
+                "gradient_strength": self.settings.appearance.gradient_strength,
+                "noise": self.settings.appearance.noise,
+                "noise_strength": self.settings.appearance.noise_strength,
+                "ambient": self.settings.appearance.ambient,
+                "ambient_strength": self.settings.appearance.ambient_strength,
+            },
+            // The settings page (and unloaded tabs) have no colors of their own: the glow fades out.
+            "ambient": active
+                .filter(|t| !t.settings_page.get() && !t.discarded)
+                .map(|t| t.ambient.as_slice())
+                .unwrap_or(&[]),
             "site_adblock": active
                 .and_then(|t| settings::site_of(&t.url))
                 .map(|site| !self.allowlist.borrow().contains(&site)),
@@ -886,6 +970,7 @@ impl Browser {
             settings_page,
             favicon: String::new(),
             tone: None,
+            ambient: Vec::new(),
         });
         self.active = self.tabs.len() - 1;
         if self.tabs.len() == 1 {
@@ -1628,6 +1713,16 @@ impl Browser {
                     self.tabs[i].tone = Some(dark);
                     if i == self.active {
                         self.refresh_chrome_theme();
+                    }
+                }
+            }
+            UserEvent::PageAmbient(id, colors) => {
+                if let Some(i) = self.tab_index(id) {
+                    if self.tabs[i].ambient != colors {
+                        self.tabs[i].ambient = colors;
+                        if i == self.active {
+                            self.sync_toolbar();
+                        }
                     }
                 }
             }

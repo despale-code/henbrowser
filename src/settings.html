@@ -120,6 +120,31 @@
   }
   .switch input:checked + .knob { background: var(--accent-color); }
   .switch input:checked + .knob::after { transform: translateX(18px); background: var(--accent-fg); }
+  /* Effect toggle + strength slider */
+  .fx-ctl { display: flex; align-items: center; gap: 14px; flex: none; }
+  .fx-ctl input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 150px;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent-color) var(--fill, 50%), var(--border-color) var(--fill, 50%));
+    outline: none;
+    transition: opacity 220ms;
+  }
+  .fx-ctl input[type="range"]:disabled { opacity: 0.35; }
+  .fx-ctl input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    border: 3px solid var(--accent-fg);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    transition: transform 200ms cubic-bezier(0.05, 0.9, 0.1, 1.05);
+  }
+  .fx-ctl input[type="range"]:not(:disabled)::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  .fx-ctl input[type="range"]:not(:disabled):active::-webkit-slider-thumb { transform: scale(0.95); }
   .site-chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; margin: 4px 6px 0 0;
     border: 1px solid var(--border-color); border-radius: 14px; font-size: 12px;
@@ -562,6 +587,36 @@
         </div>
         <div class="card-row">
           <div class="card-info">
+            <div class="card-title">Theme gradient</div>
+            <div class="card-desc">A soft, slowly drifting wash of your ChickenWM accent colors behind the toolbar and tabs</div>
+          </div>
+          <div class="fx-ctl">
+            <input type="range" min="0" max="100" step="1" data-ap-range="gradient_strength" data-ap-for="gradient" title="Strength">
+            <label class="switch"><input type="checkbox" data-ap="gradient"><span class="knob"></span></label>
+          </div>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Ambient colors</div>
+            <div class="card-desc">The colors of the page you're on bleed into the toolbar and tabs as slow, blurred glows</div>
+          </div>
+          <div class="fx-ctl">
+            <input type="range" min="0" max="100" step="1" data-ap-range="ambient_strength" data-ap-for="ambient" title="Strength">
+            <label class="switch"><input type="checkbox" data-ap="ambient"><span class="knob"></span></label>
+          </div>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Grain</div>
+            <div class="card-desc">A fine film-grain texture over the browser's surfaces</div>
+          </div>
+          <div class="fx-ctl">
+            <input type="range" min="0" max="100" step="1" data-ap-range="noise_strength" data-ap-for="noise" title="Strength">
+            <label class="switch"><input type="checkbox" data-ap="noise"><span class="knob"></span></label>
+          </div>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
             <div class="card-title">Custom styling</div>
             <div class="card-desc">Colors come from ~/.config/chickenwm/browser.css, written by the ChickenWM theme. Edit it for anything else.</div>
           </div>
@@ -689,6 +744,18 @@
       post({ cmd: "set_appearance", appearance });
     };
   });
+  // Strength sliders apply live while dragging (lightly throttled; each change is saved).
+  let rangeTimer = null;
+  document.querySelectorAll("[data-ap-range]").forEach((el) => {
+    const paint = () => el.style.setProperty("--fill", el.value + "%");
+    el.addEventListener("input", () => {
+      paint();
+      if (!appearance) return;
+      appearance[el.dataset.apRange] = Number(el.value);
+      clearTimeout(rangeTimer);
+      rangeTimer = setTimeout(() => post({ cmd: "set_appearance", appearance }), 60);
+    });
+  });
   document.getElementById("tracking-select").onchange = (e) => {
     if (!privacy) return;
     privacy.tracking_prevention = e.target.value;
@@ -728,6 +795,12 @@
         darkToggle.disabled = follow;
         darkToggle.closest(".card-row").style.opacity = follow ? 0.55 : 1;
         document.querySelectorAll("[data-ap]").forEach((el) => { el.checked = !!appearance[el.dataset.ap]; });
+        document.querySelectorAll("[data-ap-range]").forEach((el) => {
+          // Don't fight the slider the user is dragging.
+          if (document.activeElement !== el) el.value = appearance[el.dataset.apRange] ?? 50;
+          el.style.setProperty("--fill", el.value + "%");
+          el.disabled = !appearance[el.dataset.apFor];
+        });
       }
       if (state.privacy) {
         privacy = state.privacy;

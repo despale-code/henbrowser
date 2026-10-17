@@ -478,11 +478,183 @@
   }
   body.flyout #pin { display: grid; }
   #pin:hover { background: var(--hover-bg); color: var(--fg-color); }
+
+  /* =========================================================================
+   * Surface effects: theme gradient, ambient page glow and grain. They sit in #fx, behind the
+   * toolbar row and the tabs, which turn translucent while any effect is on. Strengths come in
+   * as --fx-* (0–1) from the browser's Appearance settings.
+   * ========================================================================= */
+  @property --amb1 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+  @property --amb2 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+  @property --amb3 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+  @property --amb4 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+  :root { --fx-gradient: 0; --fx-noise: 0; --fx-ambient: 0; }
+
+  #fx {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  #fx > div { position: absolute; transition: opacity 900ms var(--anim-smooth); }
+
+  /* Theme gradient: accent washes from the corners, drifting very slowly. */
+  #fx-gradient {
+    inset: -25%;
+    opacity: var(--fx-gradient);
+    background:
+      radial-gradient(42% 55% at 18% 22%, color-mix(in srgb, var(--accent-color) 30%, transparent), transparent 70%),
+      radial-gradient(38% 50% at 82% 12%, color-mix(in srgb, var(--accent-secondary) 26%, transparent), transparent 70%),
+      radial-gradient(50% 60% at 50% 95%, color-mix(in srgb, var(--accent-color) 16%, transparent), transparent 75%);
+    animation: fx-drift 48s ease-in-out infinite alternate;
+  }
+  @keyframes fx-drift {
+    0%   { transform: translate3d(-3%, -2%, 0) rotate(0deg) scale(1); }
+    50%  { transform: translate3d(2%, 3%, 0) rotate(4deg) scale(1.05); }
+    100% { transform: translate3d(4%, -1%, 0) rotate(-3deg) scale(1.02); }
+  }
+
+  /* Ambient glow: page colors as large soft blobs hugging the page edge, cross-fading
+     (registered colors interpolate) and wandering slowly. */
+  #fx-ambient {
+    inset: 0;
+    opacity: var(--fx-ambient);
+    transition: opacity 900ms var(--anim-smooth), --amb1 3.2s var(--anim-smooth),
+                --amb2 3.6s var(--anim-smooth), --amb3 4s var(--anim-smooth), --amb4 4.4s var(--anim-smooth);
+  }
+  #fx-ambient .blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(28px);
+    will-change: transform;
+  }
+  #fx-ambient .b1 { width: 70vw; height: 190px; left: 15vw; top: 10px;
+    background: radial-gradient(closest-side, var(--amb1), transparent); animation: amb-a 34s ease-in-out infinite alternate; }
+  #fx-ambient .b2 { width: 46vw; height: 170px; left: -8vw; top: -20px;
+    background: radial-gradient(closest-side, var(--amb2), transparent); animation: amb-b 41s ease-in-out infinite alternate; }
+  #fx-ambient .b3 { width: 46vw; height: 170px; right: -8vw; top: -10px;
+    background: radial-gradient(closest-side, var(--amb3), transparent); animation: amb-c 47s ease-in-out infinite alternate; }
+  #fx-ambient .b4 { width: 300px; height: 75vh; left: -90px; top: 20vh;
+    background: radial-gradient(closest-side, var(--amb4), transparent); animation: amb-d 53s ease-in-out infinite alternate; }
+  @keyframes amb-a { to { transform: translate3d(6vw, 12px, 0) scale(1.15, 0.9); } }
+  @keyframes amb-b { to { transform: translate3d(10vw, 18px, 0) scale(1.2); } }
+  @keyframes amb-c { to { transform: translate3d(-12vw, 8px, 0) scale(0.9, 1.15); } }
+  @keyframes amb-d { to { transform: translate3d(30px, -12vh, 0) scale(1.1, 1.25); } }
+
+  /* Grain, like Zen: static fractal noise blended into whatever is under it. */
+  #fx-noise {
+    inset: 0;
+    opacity: calc(var(--fx-noise) * 0.6);
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+  }
+
+  /* With effects on, the surfaces let them through. */
+  body.fx #row { background: transparent; }
+  body.fx #tabs { background: color-mix(in srgb, var(--tab-strip-bg) 45%, transparent); }
+  body.fx.vertical #tabs { background: color-mix(in srgb, var(--sidebar-bg) 40%, transparent); }
+  body.fx.vertical.autohide #tabs { background: color-mix(in srgb, var(--sidebar-bg) 70%, transparent); }
+  body.fx.vertical.autohide #tabs:hover { background: var(--accent-color); }
+  /* The flyout is its own small webview sliding over the page: no fixed layers there, its panel
+     carries a tinted gradient of its own. */
+  body.flyout #fx { display: none; }
+  body.flyout.fx #tabs {
+    background:
+      radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--accent-color) calc(var(--fx-gradient) * 18%), transparent), transparent),
+      var(--sidebar-bg);
+  }
+
+  /* =========================================================================
+   * Motion polish
+   * ========================================================================= */
+
+  /* Softer tab separators that step aside around the hovered / active tab. */
+  .tab { border-right: 0; }
+  .tab::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 9px;
+    bottom: 9px;
+    width: 1px;
+    background: var(--border-color);
+    transition: opacity 200ms var(--anim-smooth);
+  }
+  #indicator + .tab::before,
+  .tab.active::before, .tab.active + .tab::before,
+  .tab:hover::before, .tab:hover + .tab::before { opacity: 0; }
+  body.vertical .tab::before { display: none; }
+
+  /* The highlight stretches over both tabs, then settles on the new one (elastic hop). */
+  #indicator.stretch { transition-duration: 160ms; transition-timing-function: var(--anim-smooth); }
+  #indicator { border-radius: 0; }
+  body:not(.vertical) #indicator { border-radius: var(--tab-radius) var(--tab-radius) 0 0; }
+
+  /* Tabs respond to the pointer. */
+  .tab:active:not(.active) { transform: scale(0.97); }
+  .tab .title { transition: opacity 220ms var(--anim-smooth), transform 280ms var(--anim-bezier); }
+
+  /* Vertical tabs: slide in from the edge, settle with a slight overshoot; leave by sliding away. */
+  body.vertical .tab {
+    padding-left: 14px;
+    transition: background-color var(--anim-duration) var(--anim-smooth),
+                color 260ms var(--anim-smooth),
+                height 340ms var(--anim-bezier), margin 340ms var(--anim-bezier),
+                opacity 280ms var(--anim-smooth), transform 420ms var(--anim-bezier);
+  }
+  body.vertical .tab:hover:not(.active) { transform: translateX(3px); }
+  body.vertical .tab:active:not(.active) { transform: translateX(3px) scale(0.97); }
+  body.vertical .tab.entering {
+    height: 0 !important;
+    opacity: 0;
+    transform: translateX(-22px) scale(0.94);
+    margin-bottom: -2px;
+  }
+  body.vertical .tab.leaving {
+    height: 0 !important;
+    opacity: 0;
+    transform: translateX(-28px) scale(0.92);
+    margin-top: -2px;
+    transition-duration: 240ms;
+  }
+  body.vertical .tab.leaving .title { opacity: 0; }
+  body.vertical .tab.leaving, body.vertical .tab.entering { max-width: none !important; padding-left: 14px !important; }
+
+  /* Collapsing keeps every favicon where it is (no jump) and fades the titles out. */
+  body.vertical.collapsed .tab { padding: 0 0 0 14px; justify-content: flex-start; }
+  body.vertical.collapsed .tab .title,
+  body.vertical.collapsed .tab .close { display: block; }
+  body.vertical.collapsed .tab .title { opacity: 0; transform: translateX(-8px); pointer-events: none; }
+  body.vertical.collapsed .tab .close { opacity: 0 !important; pointer-events: none; }
+  body.vertical #tabs { transition: width 380ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth); }
+
+  /* Flyout: slides and fades with a soft shadow. */
+  body.flyout #tabs {
+    opacity: 0;
+    box-shadow: 8px 0 28px var(--shadow-color);
+    transition: transform 320ms var(--anim-bezier), opacity 220ms var(--anim-smooth), background-color var(--theme-fade);
+  }
+  body.flyout.open #tabs { opacity: 1; }
+  body.flyout.open.closing #tabs { opacity: 0; }
+
+  /* Address bar: a soft accent glow when focused. */
+  #field.focus {
+    box-shadow: 0 0 0 2px var(--accent-ring),
+                0 8px 24px color-mix(in srgb, var(--accent-ring) 18%, transparent),
+                0 6px 18px var(--shadow-color);
+  }
 </style>
 <!-- Injected user stylesheet from ~/.config/chickenwm/browser.css -->
 <style id="user-theme"></style>
 </head>
 <body>
+  <div id="fx" aria-hidden="true">
+    <div id="fx-gradient"></div>
+    <div id="fx-ambient"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span></div>
+    <div id="fx-noise"></div>
+  </div>
   <div class="grip" id="grip-n"></div>
   <div class="grip" id="grip-nw"></div>
   <div class="grip" id="grip-ne"></div>
@@ -633,7 +805,9 @@
     box.appendChild(img);
   }
 
+  let stretching = false;
   function moveIndicator() {
+    if (stretching) return;
     const active = tabsEl.querySelector(".tab.active:not(.leaving)");
     if (!active) { indicator.classList.remove("ready"); return; }
     indicator.style.width = active.offsetWidth + "px";
@@ -642,7 +816,67 @@
     indicator.classList.add("ready");
   }
 
+  // Switching tabs: the highlight first stretches to span both tabs, then contracts onto the new
+  // one, so it reads as one elastic piece rather than a slide.
+  function hopIndicator(from, to) {
+    if (document.body.classList.contains("no-anim") || !from || !to || !indicator.classList.contains("ready")) {
+      moveIndicator();
+      return;
+    }
+    const x0 = Math.min(from.offsetLeft, to.offsetLeft);
+    const y0 = Math.min(from.offsetTop, to.offsetTop);
+    const x1 = Math.max(from.offsetLeft + from.offsetWidth, to.offsetLeft + to.offsetWidth);
+    const y1 = Math.max(from.offsetTop + from.offsetHeight, to.offsetTop + to.offsetHeight);
+    stretching = true;
+    indicator.classList.add("stretch");
+    if (vertical) {
+      indicator.style.height = (y1 - y0) + "px";
+      indicator.style.transform = `translate(${to.offsetLeft}px, ${y0}px)`;
+    } else {
+      indicator.style.width = (x1 - x0) + "px";
+      indicator.style.transform = `translate(${x0}px, ${to.offsetTop}px)`;
+    }
+    setTimeout(() => {
+      stretching = false;
+      indicator.classList.remove("stretch");
+      moveIndicator();
+    }, 150);
+  }
+  let activeId = null;
+
+  // ── Surface effects ──
+  const fxRoot = document.documentElement.style;
+  let ambientSig = "";
+  function applyFx(fx, colors) {
+    fx = fx || {};
+    const level = (on, v) => (on ? Math.max(0, Math.min(100, Number(v) || 0)) / 100 : 0);
+    const g = level(fx.gradient, fx.gradient_strength);
+    const n = level(fx.noise, fx.noise_strength);
+    const a = level(fx.ambient, fx.ambient_strength);
+    fxRoot.setProperty("--fx-gradient", g);
+    fxRoot.setProperty("--fx-noise", n);
+    fxRoot.setProperty("--fx-ambient", a);
+    document.body.classList.toggle("fx", g > 0 || n > 0 || a > 0);
+
+    // Page colors → the four glows (dominant color at the top centre, the rest around it).
+    colors = Array.isArray(colors) ? colors : [];
+    const sig = JSON.stringify(colors);
+    if (sig === ambientSig) return;
+    ambientSig = sig;
+    const rgb = (c, alpha) => (c ? `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})` : "transparent");
+    const pick = (i) => colors[i] || colors[0];
+    const amb = $("fx-ambient").style;
+    amb.setProperty("--amb1", rgb(pick(0), 0.85));
+    amb.setProperty("--amb2", rgb(pick(1), 0.7));
+    amb.setProperty("--amb3", rgb(pick(2), 0.7));
+    amb.setProperty("--amb4", rgb(pick(3), 0.6));
+  }
+
   function renderTabs(tabs) {
+    const nextActive = (tabs.find((t) => t.active) || {}).id ?? null;
+    const fromEl = activeId !== null ? tabEls.get(activeId) : null;
+    const switched = activeId !== null && nextActive !== null && nextActive !== activeId && fromEl && tabEls.has(nextActive);
+    activeId = nextActive;
     const seen = new Set();
     let prev = indicator;
     for (const t of tabs) {
@@ -668,8 +902,9 @@
       el.classList.remove("active");
       setTimeout(() => { el.remove(); moveIndicator(); }, 260);
     }
+    if (switched) hopIndicator(fromEl, tabEls.get(nextActive));
     // Keep the highlight glued to its tab while widths animate.
-    const until = performance.now() + 420;
+    const until = performance.now() + 460;
     const follow = () => { moveIndicator(); if (performance.now() < until) requestAnimationFrame(follow); };
     requestAnimationFrame(follow);
   }
@@ -687,6 +922,7 @@
       document.body.classList.toggle("autohide", !flyout && autohide);
       document.body.classList.toggle("collapsed", !flyout && !!L.collapsed);
       document.body.classList.toggle("no-anim", L.animations === false);
+      applyFx(s.fx, s.ambient);
 
       renderTabs(s.tabs);
       const active = s.tabs.find((t) => t.active);
