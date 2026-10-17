@@ -1,0 +1,487 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* =========================================================================
+   * ChickenBrowser Safari-Style Minimalist UI
+   * Themed for ChickenWM with #141413 accent and DepartureMono.
+   *
+   * Customizable via ~/.config/chickenwm/browser.css (live hot-reloaded).
+   * ========================================================================= */
+  :root {
+    --bg-color: #f0e6d3;
+    --tab-strip-bg: #e6dac3;
+    --surface-color: #fffcf5;
+    --field-bg: rgba(255, 252, 245, 0.85);
+    --field-hover-bg: #fffcf5;
+    --field-focus-bg: #ffffff;
+
+    --fg-color: #2b1d14;
+    --subtext-color: #6b5545;
+    --faint-color: rgba(43, 29, 20, 0.45);
+
+    --accent-color: #3b2a1f;
+    --accent-fg: #f5ecdc;
+    --accent-secondary: #8a6a50;
+    --accent-ring: #3b2a1f;
+    --hover-bg: rgba(59, 42, 31, 0.12);
+    --press-bg: rgba(59, 42, 31, 0.22);
+
+    --border-color: rgba(59, 42, 31, 0.28);
+    --shadow-color: rgba(30, 20, 12, 0.24);
+    --border-radius: 8px;
+    --tab-radius: 6px;
+
+    --close-hover-bg: #d32f2f;
+    --close-hover-fg: #ffffff;
+
+    --font-family: "DepartureMono Nerd Font Mono", "DepartureMono Nerd Font", "Cascadia Code", monospace;
+    --font-size: 15px;
+
+    --anim-duration: 200ms;
+    --anim-bezier: cubic-bezier(0.05, 0.9, 0.1, 1.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-color);
+    color: var(--fg-color);
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: default;
+    display: grid;
+    place-items: center;
+  }
+
+  /* Top-edge invisible resize grips (for borderless window) */
+  .grip { position: fixed; z-index: 20; }
+  #grip-n  { top: 0; left: 10px; right: 10px; height: 4px; cursor: ns-resize; }
+  #grip-nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+  #grip-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+
+  /* ── Safari UX Row 1: Main Toolbar ── */
+  #row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 48px;
+    padding: 0 0 0 12px;
+    background: var(--bg-color);
+    position: relative;
+    z-index: 5;
+  }
+  .spacer { flex: 1 1 0; min-width: 8px; align-self: stretch; }
+
+  .btn {
+    width: 34px;
+    height: 32px;
+    border-radius: var(--border-radius);
+    color: var(--fg-color);
+    flex: none;
+    transition: background var(--anim-duration) var(--anim-bezier),
+                color var(--anim-duration) var(--anim-bezier),
+                transform 100ms var(--anim-bezier);
+  }
+  .btn:hover { background: var(--hover-bg); }
+  .btn:active { background: var(--press-bg); transform: scale(0.93); }
+
+  /* Window Close Button at the top right */
+  #close {
+    width: 44px;
+    height: 100%;
+    margin-left: 2px;
+    color: var(--subtext-color);
+    font-size: 15px;
+    display: grid;
+    place-items: center;
+    transition: background var(--anim-duration) var(--anim-bezier),
+                color var(--anim-duration) var(--anim-bezier);
+  }
+  #close:hover {
+    background: var(--close-hover-bg);
+    color: var(--close-hover-fg);
+  }
+  #close:active { filter: brightness(0.9); }
+
+  /* Centered Address / Search Field (Safari Style) */
+  #field {
+    position: relative;
+    flex: 0 1 680px;
+    min-width: 240px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    border-radius: var(--border-radius);
+    background: var(--field-bg);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    transition: background var(--anim-duration) var(--anim-bezier),
+                border-color var(--anim-duration) var(--anim-bezier),
+                box-shadow var(--anim-duration) var(--anim-bezier);
+  }
+  #field:hover {
+    background: var(--field-hover-bg);
+    border-color: rgba(88, 91, 112, 0.8);
+  }
+  #field.focus {
+    background: var(--field-focus-bg);
+    border-color: var(--accent-ring);
+    box-shadow: 0 0 0 2px var(--accent-ring);
+  }
+
+  #shield {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    padding: 0 4px 0 10px;
+    color: var(--faint-color);
+    font-size: 13px;
+    flex: none;
+    transition: color var(--anim-duration) var(--anim-bezier);
+  }
+  #shield.on { color: var(--subtext-color); }
+  #shield.on #blocked {
+    background: var(--border-color);
+    color: var(--fg-color);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: normal;
+    margin-left: 2px;
+  }
+  #shield.active-block {
+    animation: shield-bump 300ms var(--anim-bezier);
+  }
+  @keyframes shield-bump {
+    50% { transform: scale(1.15); color: var(--accent-ring); }
+  }
+
+  #addr {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0 8px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--fg-color);
+    font-family: inherit;
+    font-size: inherit;
+    text-align: center;
+    transition: text-align 100ms;
+  }
+  #field.focus #addr { text-align: left; }
+  #addr::placeholder { color: var(--faint-color); }
+
+  #reload {
+    width: 32px;
+    height: 100%;
+    color: var(--subtext-color);
+    flex: none;
+    font-size: 14px;
+    transition: color var(--anim-duration) var(--anim-bezier),
+                transform 240ms var(--anim-bezier);
+  }
+  #reload:hover { color: var(--fg-color); }
+  #field.loading #reload {
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { 100% { transform: rotate(360deg); } }
+
+  /* Animated loading progress along the bottom of the address bar */
+  #progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 100%;
+    background: var(--accent-ring);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--anim-duration) var(--anim-bezier);
+  }
+  #field.loading #progress {
+    opacity: 1;
+    animation: hypr-load 1.3s var(--anim-bezier) infinite;
+  }
+  @keyframes hypr-load {
+    0% { transform: translateX(-100%) scaleX(0.15); }
+    50% { transform: translateX(20%) scaleX(0.65); }
+    100% { transform: translateX(100%) scaleX(0.15); }
+  }
+
+  #exts { display: flex; gap: 3px; flex: none; }
+  .ext {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--border-radius);
+    transition: background var(--anim-duration) var(--anim-bezier);
+  }
+  .ext img { width: 18px; height: 18px; border-radius: 3px; }
+  .ext.open { background: var(--press-bg); }
+
+  /* ── Safari UX Row 2: Tab Strip ── */
+  #tabs {
+    display: flex;
+    height: 34px;
+    background: var(--tab-strip-bg);
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    overflow-x: auto;
+    scrollbar-width: none;
+    position: relative;
+    z-index: 4;
+  }
+  #tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 0;
+    min-width: 130px;
+    max-width: 280px;
+    padding: 0 32px;
+    color: var(--subtext-color);
+    border-right: 1px solid var(--border-color);
+    font-weight: normal;
+    transition: background var(--anim-duration) var(--anim-bezier),
+                color var(--anim-duration) var(--anim-bezier);
+    cursor: default;
+  }
+  .tab:hover {
+    background: var(--hover-bg);
+    color: var(--fg-color);
+  }
+  .tab.active {
+    background: var(--accent-color);
+    color: var(--accent-fg);
+    font-weight: normal;
+    border-top: 2px solid var(--accent-color);
+    border-bottom: 0;
+    box-shadow: 0 2px 6px var(--shadow-color);
+  }
+  .tab.active .close {
+    color: rgba(245, 236, 220, 0.7);
+  }
+  .tab.active .close:hover {
+    color: #ffffff;
+    background: rgba(245, 236, 220, 0.22);
+  }
+  .tab.active .dot {
+    background: var(--accent-fg);
+  }
+
+  .tab .title {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: var(--font-size);
+    font-weight: normal;
+  }
+
+  .tab .close {
+    position: absolute;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--subtext-color);
+    opacity: 0;
+    transition: opacity 120ms, background 120ms, color 120ms;
+  }
+  .tab:hover .close { opacity: 0.8; }
+  .tab .close:hover { opacity: 1; background: var(--press-bg); color: var(--fg-color); }
+
+  .tab .dot {
+    position: absolute;
+    left: 10px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-ring);
+    opacity: 0;
+  }
+  .tab.loading .dot {
+    opacity: 1;
+    animation: pulse-dot 1s var(--anim-bezier) infinite;
+  }
+  @keyframes pulse-dot {
+    0% { transform: scale(0.8); opacity: 0.4; }
+    50% { transform: scale(1.25); opacity: 1; box-shadow: 0 0 6px var(--shadow-color); }
+    100% { transform: scale(0.8); opacity: 0.4; }
+  }
+</style>
+<!-- Injected user stylesheet from ~/.config/chickenwm/browser.css -->
+<style id="user-theme"></style>
+</head>
+<body>
+  <!-- Top window resize handles -->
+  <div class="grip" id="grip-n"></div>
+  <div class="grip" id="grip-nw"></div>
+  <div class="grip" id="grip-ne"></div>
+
+  <!-- Safari UX Row 1: Main Toolbar -->
+  <div id="row">
+    <button class="btn" id="back" title="Back (Alt+Left)">&#x2190;</button>
+    <button class="btn" id="fwd" title="Forward (Alt+Right)">&#x2192;</button>
+    <div class="spacer"></div>
+    <div id="field">
+      <div id="shield" title="Ad &amp; tracker blocking">&#x25c8; <span id="blocked">0</span></div>
+      <input id="addr" spellcheck="false" placeholder="Search or enter website name">
+      <button id="reload" title="Reload (Ctrl+R)">&#x21bb;</button>
+      <div id="progress"></div>
+    </div>
+    <div class="spacer"></div>
+    <div id="exts"></div>
+    <button class="btn" id="newtab" title="New tab (Ctrl+T)">&#x2b;</button>
+    <button class="btn" id="menu-btn" title="Customize and control chickenbrowser">
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
+        <rect y="0" width="16" height="2" rx="1"/>
+        <rect y="5" width="16" height="2" rx="1"/>
+        <rect y="10" width="16" height="2" rx="1"/>
+      </svg>
+    </button>
+    <button id="close" title="Close window">&#x2715;</button>
+  </div>
+
+  <!-- Safari UX Row 2: Tab Strip -->
+  <div id="tabs"></div>
+
+<script>
+  const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+  const $ = (id) => document.getElementById(id);
+  const tabsEl = $("tabs"), addr = $("addr"), field = $("field");
+  let currentUrl = "";
+
+  const pretty = (url) => {
+    try {
+      const u = new URL(url);
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        return u.hostname.replace(/^www\./, "");
+      }
+    } catch (_) {}
+    return url;
+  };
+
+  $("close").onclick = () => post({ cmd: "close_window" });
+  $("newtab").onclick = () => post({ cmd: "new_tab" });
+  $("menu-btn").onclick = () => post({ cmd: "toggle_menu" });
+  $("back").onclick = () => post({ cmd: "back" });
+  $("fwd").onclick = () => post({ cmd: "forward" });
+  $("reload").onclick = () => post({ cmd: "reload" });
+
+  for (const edge of ["n", "nw", "ne"]) {
+    $("grip-" + edge).onmousedown = (e) => {
+      if (e.button === 0) { post({ cmd: "resize_window", edge }); e.preventDefault(); }
+    };
+  }
+
+  // Dragging empty chrome space moves the window; double-click toggles maximize.
+  const isChrome = (t) => t === $("row") || t === tabsEl || t.classList.contains("spacer");
+  document.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || !isChrome(e.target)) return;
+    e.preventDefault();
+    post({ cmd: e.detail === 2 ? "toggle_maximize" : "drag_window" });
+  });
+
+  addr.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { post({ cmd: "navigate", input: addr.value }); addr.blur(); }
+    if (e.key === "Escape") { addr.blur(); post({ cmd: "focus_page" }); }
+  });
+  addr.addEventListener("focus", () => {
+    field.classList.add("focus");
+    addr.value = currentUrl;
+    addr.select();
+  });
+  addr.addEventListener("blur", () => {
+    field.classList.remove("focus");
+    addr.value = pretty(currentUrl);
+  });
+  tabsEl.addEventListener("wheel", (e) => { tabsEl.scrollLeft += e.deltaY; });
+
+  let lastBlockedCount = 0;
+
+  window.hb = {
+    render(s) {
+      // Tabs
+      tabsEl.innerHTML = "";
+      let loading = false;
+      for (const t of s.tabs) {
+        if (t.active) loading = t.loading;
+        const el = document.createElement("div");
+        el.className = "tab" + (t.active ? " active" : "") + (t.loading ? " loading" : "");
+        el.title = t.url;
+        el.innerHTML = '<span class="dot"></span><span class="title"></span><button class="close" title="Close tab (Ctrl+W)">&#x2715;</button>';
+        el.querySelector(".title").textContent = t.title || pretty(t.url) || "New Tab";
+        el.onmousedown = (e) => {
+          if (e.button === 1) { post({ cmd: "close_tab", id: t.id }); e.preventDefault(); }
+          else if (e.button === 0 && !e.target.classList.contains("close")) {
+            if (e.detail === 2) post({ cmd: "toggle_maximize" });
+            else if (!t.active) post({ cmd: "switch_tab", id: t.id });
+            else post({ cmd: "drag_window" });
+          }
+        };
+        el.querySelector(".close").onclick = (e) => {
+          e.stopPropagation();
+          post({ cmd: "close_tab", id: t.id });
+        };
+        tabsEl.appendChild(el);
+      }
+
+      currentUrl = s.url || "";
+      if (document.activeElement !== addr) addr.value = pretty(currentUrl);
+      field.classList.toggle("loading", loading);
+
+      if (s.blocked !== lastBlockedCount) {
+        lastBlockedCount = s.blocked;
+        $("shield").classList.add("active-block");
+        setTimeout(() => $("shield").classList.remove("active-block"), 350);
+      }
+      $("blocked").textContent = s.blocked;
+      $("shield").className = "on" + (s.adblock ? "" : " faint");
+      $("shield").title = s.adblock
+        ? `Ad & tracker blocking on (EasyList + EasyPrivacy) — ${s.blocked} blocked`
+        : "Ad blocking loading…";
+
+      const exts = $("exts");
+      exts.innerHTML = "";
+      for (const x of s.extensions) {
+        const b = document.createElement("button");
+        b.className = "btn ext" + (x.id === s.popup ? " open" : "");
+        b.title = x.name;
+        b.innerHTML = x.icon ? '<img alt="">' : "&#x25a3;";
+        if (x.icon) b.querySelector("img").src = x.icon;
+        b.onclick = () => post({ cmd: "ext_popup", id: x.id });
+        exts.appendChild(b);
+      }
+    },
+    focusAddress() { addr.focus(); addr.select(); },
+    setUserStyle(css) {
+      let el = $("user-theme");
+      if (!el) {
+        el = document.createElement("style");
+        el.id = "user-theme";
+        document.head.appendChild(el);
+      }
+      el.textContent = css || "";
+    },
+  };
+  post({ cmd: "ready" });
+</script>
+</body>
+</html>

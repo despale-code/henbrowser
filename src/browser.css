@@ -1,0 +1,98 @@
+/* =============================================================================
+ * ChickenWM Browser Theme (~/.config/chickenwm/browser.css)
+ *
+ * Themed using colors directly from ~/.config/chickenwm/roobar.css (Sepia Islands).
+ * Never uses bold text on tabs (DepartureMono pixel font has no bold face).
+ *
+ * Live hot-reloads on save (<5ms). You can edit any variables or add custom CSS.
+ * ============================================================================= */
+
+:root {
+    /* Base Surfaces (from roobar.css --pill-bg / sepia palette) */
+    --bg-color: #f0e6d3;
+    --tab-strip-bg: #e6dac3;
+    --surface-color: #fffcf5;
+    --field-bg: rgba(255, 252, 245, 0.85);
+    --field-hover-bg: #fffcf5;
+    --field-focus-bg: #ffffff;
+
+    /* Foreground / Text (from roobar.css --fg-color / --subtext-color) */
+    --fg-color: #2b1d14;
+    --subtext-color: #6b5545;
+    --faint-color: rgba(43, 29, 20, 0.45);
+
+    /* Workspaces / Active Accents (from roobar.css --ws-active-bg / --ws-active-fg) */
+    --accent-color: #3b2a1f;
+    --accent-fg: #f5ecdc;
+    --accent-secondary: #8a6a50;
+    --hover-bg: rgba(59, 42, 31, 0.12);
+    --press-bg: rgba(59, 42, 31, 0.22);
+
+    /* Borders & Shadows (from roobar.css --border-color / --shadow-color) */
+    --border-color: rgba(59, 42, 31, 0.28);
+    --shadow-color: rgba(30, 20, 12, 0.24);
+    --border-radius: 8px;
+    --tab-radius: 6px;
+
+    /* Window Close Button (top-right) */
+    --close-hover-bg: #d32f2f;
+    --close-hover-fg: #ffffff;
+
+    /* Typography: DepartureMono (~4px larger than 11px = 15px) */
+    --font-family: "DepartureMono Nerd Font Mono", "DepartureMono Nerd Font", "Cascadia Code", monospace;
+    --font-size: 15px;
+
+    /* Motion & Animations (from roobar.css --anim-ms / ChickenWM bezier) */
+    --anim-duration: 200ms;
+    --anim-bezier: cubic-bezier(0.05, 0.9, 0.1, 1.05);
+}
+
+/* ── Tab Strip & Component Styles ── */
+
+/* Active tab: dark-brown sliding highlight with sepia-white text, NO bold */
+.tab.active {
+    background: var(--accent-color) !important;
+    color: var(--accent-fg) !important;
+    font-weight: normal !important;
+    border: 1px solid var(--accent-color) !important;
+    box-shadow: 0 2px 6px var(--shadow-color) !important;
+}
+
+.tab {
+    font-weight: normal !important;
+}
+
+.tab .title {
+    font-weight: normal !important;
+}
+
+.tab.active .close {
+    color: color-mix(in srgb, var(--accent-fg) 70%, transparent) !important;
+}
+
+.tab.active .close:hover {
+    color: var(--accent-fg) !important;
+    background: color-mix(in srgb, var(--accent-fg) 22%, transparent) !important;
+}
+
+.tab.active .dot {
+    background: var(--accent-fg) !important;
+}
+
+/* Address bar focused state */
+#field.focus {
+    border-color: var(--accent-color) !important;
+    box-shadow: 0 0 0 2px var(--accent-color) !important;
+}
+
+/* Loading animation along bottom of address bar */
+#field.loading #progress {
+    background: var(--accent-color) !important;
+}
+
+/* Adblock badge counter */
+#shield.on #blocked {
+    background: var(--accent-color) !important;
+    color: var(--accent-fg) !important;
+    font-weight: normal !important;
+}

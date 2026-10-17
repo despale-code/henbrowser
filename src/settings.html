@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings — chickenbrowser</title>
+<style>
+  :root {
+    --bg-color: #f0e6d3;
+    --sidebar-bg: #e6dac3;
+    --surface-color: #fffcf5;
+    --card-bg: #ffffff;
+    --fg-color: #2b1d14;
+    --subtext-color: #6b5545;
+    --faint-color: rgba(43, 29, 20, 0.45);
+    --accent-color: #3b2a1f;
+    --accent-fg: #f5ecdc;
+    --border-color: rgba(59, 42, 31, 0.22);
+    --hover-bg: rgba(59, 42, 31, 0.08);
+    --active-bg: rgba(59, 42, 31, 0.15);
+    --font-family: "DepartureMono Nerd Font Mono", "DepartureMono Nerd Font", "Cascadia Code", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-color);
+    color: var(--fg-color);
+    font-family: var(--font-family);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  #layout {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+  }
+  /* Sidebar */
+  #sidebar {
+    width: 240px;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 12px;
+    gap: 4px;
+    flex: none;
+    user-select: none;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px 20px 12px;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--fg-color);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 8px;
+  }
+  .brand-icon {
+    font-size: 18px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: default;
+    color: var(--subtext-color);
+    transition: background 150ms ease, color 150ms ease;
+  }
+  .nav-item:hover {
+    background: var(--hover-bg);
+    color: var(--fg-color);
+  }
+  .nav-item.active {
+    background: var(--accent-color);
+    color: var(--accent-fg);
+  }
+  .nav-item.active .nav-icon {
+    color: var(--accent-fg);
+  }
+  .nav-icon {
+    width: 18px;
+    text-align: center;
+  }
+  /* Main Content */
+  #content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 36px 48px;
+  }
+  .section {
+    display: none;
+    max-width: 760px;
+  }
+  .section.active {
+    display: block;
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 500;
+    margin-bottom: 24px;
+    color: var(--fg-color);
+  }
+  h2 {
+    font-size: 16px;
+    font-weight: 500;
+    margin: 20px 0 12px 0;
+    color: var(--subtext-color);
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 6px rgba(30, 20, 12, 0.04);
+  }
+  .card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+  }
+  .card-row + .card-row {
+    border-top: 1px solid rgba(59, 42, 31, 0.1);
+    margin-top: 8px;
+    padding-top: 16px;
+  }
+  .card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--fg-color);
+  }
+  .card-desc {
+    font-size: 12px;
+    color: var(--subtext-color);
+  }
+  /* Buttons and Form Controls */
+  .btn {
+    background: var(--accent-color);
+    color: var(--accent-fg);
+    border: 0;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: default;
+    transition: filter 150ms ease, transform 100ms ease;
+  }
+  .btn:hover {
+    filter: brightness(1.15);
+  }
+  .btn:active {
+    transform: scale(0.97);
+  }
+  .btn.secondary {
+    background: var(--surface-color);
+    color: var(--fg-color);
+    border: 1px solid var(--border-color);
+  }
+  .btn.secondary:hover {
+    background: var(--hover-bg);
+  }
+  .btn.danger {
+    background: #d32f2f;
+    color: #ffffff;
+  }
+  select {
+    background: var(--surface-color);
+    color: var(--fg-color);
+    border: 1px solid var(--border-color);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    cursor: default;
+  }
+  .badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    color: var(--subtext-color);
+  }
+  .badge.success {
+    background: rgba(46, 125, 50, 0.15);
+    color: #2e7d32;
+    border-color: rgba(46, 125, 50, 0.3);
+  }
+  /* Extension Card */
+  .ext-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+  }
+  .ext-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+  }
+  .ext-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ext-name {
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ext-ver {
+    font-size: 11px;
+    color: var(--subtext-color);
+  }
+  .ext-path {
+    font-size: 11px;
+    color: var(--faint-color);
+    word-break: break-all;
+  }
+  .mem-h2 {
+    font-size: 14px;
+    font-weight: 500;
+    margin: 22px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #sec-memory input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-color);
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+<div id="layout">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="brand">
+      <span class="brand-icon">&#x2699;</span>
+      <span>Settings</span>
+    </div>
+    <div class="nav-item active" data-tab="search">
+      <span class="nav-icon">&#x1f50d;</span>
+      <span>Search engine</span>
+    </div>
+    <div class="nav-item" data-tab="memory">
+      <span class="nav-icon">&#x26a1;</span>
+      <span>Memory &amp; performance</span>
+    </div>
+    <div class="nav-item" data-tab="privacy">
+      <span class="nav-icon">&#x1f6e1;</span>
+      <span>Privacy &amp; security</span>
+    </div>
+    <div class="nav-item" data-tab="appearance">
+      <span class="nav-icon">&#x1f3a8;</span>
+      <span>Appearance</span>
+    </div>
+    <div class="nav-item" data-tab="extensions">
+      <span class="nav-icon">&#x1f9e9;</span>
+      <span>Extensions</span>
+    </div>
+    <div class="nav-item" data-tab="about">
+      <span class="nav-icon">&#x2139;</span>
+      <span>About chickenbrowser</span>
+    </div>
+  </div>
+
+  <!-- Content Sections -->
+  <div id="content">
+    <!-- Search Engine Section -->
+    <div class="section active" id="sec-search">
+      <h1>Search engine</h1>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Search engine used in the address bar</div>
+            <div class="card-desc">When entering non-URL queries into the address field</div>
+          </div>
+          <select id="search-select">
+            <option value="https://duckduckgo.com/?q=" selected>DuckDuckGo</option>
+            <option value="https://www.google.com/search?q=">Google</option>
+            <option value="https://search.brave.com/search?q=">Brave</option>
+            <option value="https://www.bing.com/search?q=">Bing</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory & Performance Section -->
+    <div class="section" id="sec-memory">
+      <h1>Memory &amp; performance</h1>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Current usage</div>
+            <div class="card-desc" id="mem-usage">Measuring&hellip;</div>
+          </div>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Preset</div>
+            <div class="card-desc" id="mem-preset-desc"></div>
+          </div>
+          <select id="mem-preset">
+            <option value="balanced">Balanced</option>
+            <option value="saver">Memory saver</option>
+            <option value="maximum">Maximum savings</option>
+            <option value="custom" disabled>Custom</option>
+          </select>
+        </div>
+        <div class="card-row" id="mem-restart-row" hidden>
+          <div class="card-info">
+            <div class="card-title">Restart needed</div>
+            <div class="card-desc">Some changes only apply after restarting chickenbrowser. Open tabs are reopened.</div>
+          </div>
+          <button class="btn" id="btn-restart">Restart now</button>
+        </div>
+      </div>
+
+      <h2 class="mem-h2">Background tabs <span class="badge">applies immediately</span></h2>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Trim memory of background tabs</div>
+            <div class="card-desc">Asks the engine to drop caches as soon as a tab is hidden</div>
+          </div>
+          <input type="checkbox" data-key="low_memory_background">
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Suspend background tabs after</div>
+            <div class="card-desc">Freezes scripts and timers. Instant to resume. Tabs playing audio are skipped.</div>
+          </div>
+          <select data-key="suspend_after_secs" data-num>
+            <option value="0">Never</option>
+            <option value="5">5 seconds</option>
+            <option value="20">20 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="300">5 minutes</option>
+          </select>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Unload background tabs after</div>
+            <div class="card-desc">Frees the tab completely; it reloads when you return (unsaved form input and back history are lost)</div>
+          </div>
+          <select data-key="discard_after_mins" data-num>
+            <option value="0">Never</option>
+            <option value="5">5 minutes</option>
+            <option value="20">20 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="240">4 hours</option>
+          </select>
+        </div>
+      </div>
+
+      <h2 class="mem-h2">Engine <span class="badge">needs restart</span></h2>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Share one browser process with the toolbar</div>
+            <div class="card-desc">Off runs the toolbar in a second WebView2 browser (about 80&ndash;150 MB more)</div>
+          </div>
+          <input type="checkbox" data-key="share_toolbar_process">
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">One process per site</div>
+            <div class="card-desc">Tabs of the same site share a renderer instead of one each</div>
+          </div>
+          <input type="checkbox" data-key="process_per_site">
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Renderer process limit</div>
+            <div class="card-desc">Fewer processes use less memory; sites start sharing processes past the limit</div>
+          </div>
+          <select data-key="renderer_process_limit" data-num>
+            <option value="0">Automatic</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="6">6</option>
+            <option value="10">10</option>
+          </select>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Disable back/forward cache</div>
+            <div class="card-desc">Stops keeping previous pages alive in memory; Back reloads the page instead</div>
+          </div>
+          <input type="checkbox" data-key="disable_back_forward_cache">
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Low-end device mode</div>
+            <div class="card-desc">Smaller caches and GPU buffers. Saves the most; scrolling and animations may get less smooth</div>
+          </div>
+          <input type="checkbox" data-key="low_end_device_mode">
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Disable background networking</div>
+            <div class="card-desc">No browser-internal pre-connects or service pings (pages and extensions are unaffected)</div>
+          </div>
+          <input type="checkbox" data-key="disable_background_networking">
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">JavaScript heap limit per tab</div>
+            <div class="card-desc">Caps runaway pages. Heavy web apps can crash when they hit a low limit</div>
+          </div>
+          <select data-key="js_heap_limit_mb" data-num>
+            <option value="0">Unlimited</option>
+            <option value="512">512 MB</option>
+            <option value="1024">1 GB</option>
+            <option value="2048">2 GB</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy & Security Section -->
+    <div class="section" id="sec-privacy">
+      <h1>Privacy &amp; security</h1>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Clear browsing data</div>
+            <div class="card-desc">Clear history, cookies, cache, and local storage data</div>
+          </div>
+          <button class="btn danger" id="btn-clear">Clear data</button>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Built-in Ad &amp; Tracker Blocker</div>
+            <div class="card-desc">EasyList + EasyPrivacy network request filtering</div>
+          </div>
+          <span class="badge success">Active</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Appearance Section -->
+    <div class="section" id="sec-appearance">
+      <h1>Appearance</h1>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Theme styling</div>
+            <div class="card-desc">Sepia Islands theme matching ~/.config/chickenwm/roobar.css</div>
+          </div>
+          <button class="btn secondary" id="btn-edit-css">Edit browser.css</button>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Font family</div>
+            <div class="card-desc">DepartureMono Nerd Font (strict normal weight tabs)</div>
+          </div>
+          <span class="badge">DepartureMono</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Extensions Section -->
+    <div class="section" id="sec-extensions">
+      <h1>Extensions</h1>
+      <div class="ext-card">
+        <div class="ext-icon">&#x1f511;</div>
+        <div class="ext-details">
+          <div class="ext-name">
+            <span>Proton Pass: Free Password Manager</span>
+            <span class="badge success">Enabled</span>
+          </div>
+          <div class="ext-ver">Version 1.42.0 &bull; Chromium MV3 Extension</div>
+          <div class="ext-path">~/.config/chickenwm/chickenbrowser/extensions/proton-pass</div>
+        </div>
+        <button class="btn" id="btn-open-pass">Open popup</button>
+      </div>
+    </div>
+
+    <!-- About Section -->
+    <div class="section" id="sec-about">
+      <h1>About chickenbrowser</h1>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">chickenbrowser</div>
+            <div class="card-desc">Version 0.1.0 (64-bit) &bull; Built for HyperWin</div>
+          </div>
+          <span class="badge">v0.1.0</span>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Engine</div>
+            <div class="card-desc">Microsoft Edge WebView2 (Chromium)</div>
+          </div>
+          <span class="badge">WebView2</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+
+  // Sidebar navigation switching
+  document.querySelectorAll(".nav-item").forEach(item => {
+    item.onclick = () => {
+      document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+      document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+      item.classList.add("active");
+      const tab = item.dataset.tab;
+      const sec = document.getElementById("sec-" + tab);
+      if (sec) sec.classList.add("active");
+    };
+  });
+
+  document.getElementById("btn-clear").onclick = () => {
+    if (confirm("Are you sure you want to clear all browsing data (cache, cookies, storage)?")) {
+      post({ cmd: "clear_data" });
+    }
+  };
+
+  document.getElementById("btn-edit-css").onclick = () => {
+    post({ cmd: "edit_css" });
+  };
+
+  document.getElementById("btn-open-pass").onclick = () => {
+    post({ cmd: "proton_pass" });
+  };
+
+  document.getElementById("search-select").onchange = (e) => {
+    post({ cmd: "set_search_engine", url: e.target.value });
+  };
+
+  // Memory & performance: the browser pushes state via hbSettings.render() on load and every
+  // few seconds; every edit is sent back as the whole memory object.
+  const presetDesc = {
+    balanced: "Suspends tabs after 1 minute. No tab unloading.",
+    saver: "Suspends after 20 s, unloads after 20 min, shares processes.",
+    maximum: "Suspends after 5 s, unloads after 5 min, low-end device mode.",
+    custom: "Your own combination of the options below.",
+  };
+  let memory = null;
+  const memInputs = document.querySelectorAll("#sec-memory [data-key]");
+  memInputs.forEach(el => {
+    el.onchange = () => {
+      if (!memory) return;
+      const key = el.dataset.key;
+      memory[key] = el.type === "checkbox" ? el.checked
+        : el.hasAttribute("data-num") ? Number(el.value) : el.value;
+      post({ cmd: "set_memory", memory });
+    };
+  });
+  document.getElementById("mem-preset").onchange = (e) => {
+    post({ cmd: "set_memory_preset", preset: e.target.value });
+  };
+  document.getElementById("btn-restart").onclick = () => post({ cmd: "restart_browser" });
+
+  window.hbSettings = {
+    render(state) {
+      memory = state.memory;
+      document.getElementById("search-select").value = state.search_engine;
+      const preset = document.getElementById("mem-preset");
+      preset.value = memory.preset;
+      document.getElementById("mem-preset-desc").textContent = presetDesc[memory.preset] || "";
+      memInputs.forEach(el => {
+        if (document.activeElement === el) return;
+        const v = memory[el.dataset.key];
+        if (el.type === "checkbox") el.checked = !!v; else el.value = String(v);
+      });
+      document.getElementById("mem-restart-row").hidden = !state.restart_needed;
+      const usage = state.usage_mb == null
+        ? "Unavailable"
+        : `${state.usage_mb} MB across ${state.processes} processes`
+          + (state.toolbar_separate ? " (+ separate toolbar browser)" : "");
+      document.getElementById("mem-usage").textContent =
+        `${usage} • ${state.tabs} tabs, ${state.asleep} sleeping`;
+    },
+  };
+  post({ cmd: "settings_ready" });
+</script>
+</body>
+</html>

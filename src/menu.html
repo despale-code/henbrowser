@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg-color: #f0e6d3;
+    --surface-color: #fffcf5;
+    --fg-color: #2b1d14;
+    --subtext-color: #6b5545;
+    --faint-color: rgba(43, 29, 20, 0.45);
+    --accent-color: #3b2a1f;
+    --accent-fg: #f5ecdc;
+    --hover-bg: rgba(59, 42, 31, 0.09);
+    --press-bg: rgba(59, 42, 31, 0.18);
+    --border-color: rgba(59, 42, 31, 0.25);
+    --shadow-color: rgba(30, 20, 12, 0.25);
+    --font-family: "DepartureMono Nerd Font Mono", "DepartureMono Nerd Font", "Cascadia Code", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--surface-color);
+    color: var(--fg-color);
+    font-family: var(--font-family);
+    font-size: 13px;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  .menu-container {
+    padding: 6px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px var(--shadow-color);
+    background: var(--surface-color);
+  }
+  .item {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: default;
+    transition: background 120ms ease, color 120ms ease;
+    gap: 10px;
+    height: 30px;
+  }
+  .item:hover {
+    background: var(--hover-bg);
+  }
+  .item:active {
+    background: var(--press-bg);
+  }
+  .item.highlight {
+    color: var(--accent-color);
+    font-weight: 500;
+  }
+  .icon {
+    width: 16px;
+    text-align: center;
+    color: var(--subtext-color);
+    font-size: 14px;
+    flex: none;
+  }
+  .label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .shortcut {
+    color: var(--faint-color);
+    font-size: 11px;
+    flex: none;
+  }
+  .sep {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 6px;
+    flex: none;
+  }
+  .zoom-row {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    gap: 8px;
+    height: 32px;
+  }
+  .zoom-row .label {
+    flex: 1;
+  }
+  .zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 1px;
+    background: rgba(255, 255, 255, 0.4);
+  }
+  .zoom-btn {
+    width: 24px;
+    height: 22px;
+    border: 0;
+    background: none;
+    color: var(--fg-color);
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: default;
+    display: grid;
+    place-items: center;
+  }
+  .zoom-btn:hover {
+    background: var(--hover-bg);
+  }
+  .zoom-btn:active {
+    background: var(--press-bg);
+  }
+  #zoom-level {
+    font-size: 11px;
+    min-width: 36px;
+    text-align: center;
+    color: var(--subtext-color);
+  }
+</style>
+</head>
+<body>
+<div class="menu-container">
+  <div class="item" data-action="new_tab">
+    <span class="icon">&#x2b;</span>
+    <span class="label">New tab</span>
+    <span class="shortcut">Ctrl+T</span>
+  </div>
+  <div class="item" data-action="new_window">
+    <span class="icon">&#x25a2;</span>
+    <span class="label">New window</span>
+    <span class="shortcut">Ctrl+N</span>
+  </div>
+  <div class="sep"></div>
+  <div class="zoom-row">
+    <span class="label">Zoom</span>
+    <div class="zoom-controls">
+      <button class="zoom-btn" id="zoom-out" title="Zoom out">-</button>
+      <span id="zoom-level">100%</span>
+      <button class="zoom-btn" id="zoom-in" title="Zoom in">+</button>
+      <button class="zoom-btn" id="fullscreen" title="Full screen (F11)">&#x26f6;</button>
+    </div>
+  </div>
+  <div class="item" data-action="print">
+    <span class="icon">&#x1f5b6;</span>
+    <span class="label">Print...</span>
+    <span class="shortcut">Ctrl+P</span>
+  </div>
+  <div class="sep"></div>
+  <div class="item" data-action="clear_data">
+    <span class="icon">&#x1f5d1;</span>
+    <span class="label">Clear browsing data...</span>
+    <span class="shortcut">Ctrl+Shift+Del</span>
+  </div>
+  <div class="item" data-action="proton_pass">
+    <span class="icon">&#x1f511;</span>
+    <span class="label">Proton Pass</span>
+  </div>
+  <div class="item" data-action="devtools">
+    <span class="icon">&#x2692;</span>
+    <span class="label">Developer tools</span>
+    <span class="shortcut">F12</span>
+  </div>
+  <div class="sep"></div>
+  <div class="item highlight" data-action="open_settings">
+    <span class="icon">&#x2699;</span>
+    <span class="label">Settings</span>
+  </div>
+  <div class="sep"></div>
+  <div class="item" data-action="close_window">
+    <span class="icon">&#x2715;</span>
+    <span class="label">Exit</span>
+    <span class="shortcut">Alt+F4</span>
+  </div>
+</div>
+
+<script>
+  const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+
+  document.querySelectorAll(".item[data-action]").forEach(el => {
+    el.onclick = () => {
+      post({ cmd: el.dataset.action });
+    };
+  });
+
+  document.getElementById("zoom-out").onclick = () => post({ cmd: "zoom_out" });
+  document.getElementById("zoom-in").onclick = () => post({ cmd: "zoom_in" });
+  document.getElementById("zoom-level").onclick = () => post({ cmd: "zoom_reset" });
+  document.getElementById("fullscreen").onclick = () => post({ cmd: "toggle_maximize" });
+
+  window.setZoom = (z) => {
+    document.getElementById("zoom-level").textContent = Math.round(z * 100) + "%";
+  };
+</script>
+</body>
+</html>
