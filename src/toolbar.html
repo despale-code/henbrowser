@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <style>
   /* =========================================================================
-   * ChickenBrowser chrome: toolbar row, tab strip / vertical tab sidebar.
+   * Hen Browser chrome: toolbar row, tab strip / vertical tab sidebar.
    *
    * This page covers the whole window *behind* the web page; the page is laid out on top of
    * the content area, so only the toolbar row and the tab strip (or sidebar) are visible.
@@ -199,16 +199,21 @@
   #field.focus #addr { text-align: left; }
   #addr::placeholder { color: var(--faint-color); }
 
-  #reload {
-    width: 32px;
+  #star {
+    width: 28px;
     height: 100%;
-    color: var(--subtext-color);
+    color: var(--faint-color);
     flex: none;
     font-size: 14px;
-    transition: color var(--anim-duration), transform 420ms var(--anim-bezier);
+    transition: color var(--anim-duration), transform 220ms var(--anim-bezier);
   }
-  #reload:hover { color: var(--fg-color); transform: rotate(-90deg); }
-  #field.loading #reload { animation: spin 0.9s linear infinite; }
+  #star:hover { color: var(--fg-color); transform: scale(1.15); }
+  #star.on { color: var(--accent-secondary, var(--fg-color)); }
+  #star[hidden] { display: none; }
+
+  #reload { transition: background-color var(--anim-duration), transform 420ms var(--anim-bezier); }
+  #reload:hover { transform: rotate(-90deg); }
+  #reload.loading { animation: spin 0.9s linear infinite; }
   @keyframes spin { 100% { transform: rotate(360deg); } }
 
   #progress {
@@ -296,7 +301,49 @@
   }
   .tab:hover:not(.active) { background: var(--hover-bg); color: var(--fg-color); }
   .tab.active { color: var(--accent-fg); }
-  .tab.asleep:not(.active) .title, .tab.asleep:not(.active) .favicon { opacity: 0.55; }
+  /* Colour groups (right-click a tab): a stripe along the tab's edge. */
+  .tab[class*="group-"] { box-shadow: inset 0 -3px 0 var(--group-color); }
+  body.vertical .tab[class*="group-"] { box-shadow: inset 3px 0 0 var(--group-color); }
+  .tab.group-1 { --group-color: #d9534f; }
+  .tab.group-2 { --group-color: #e8a33d; }
+  .tab.group-3 { --group-color: #e3c84a; }
+  .tab.group-4 { --group-color: #5cb85c; }
+  .tab.group-5 { --group-color: #4a90d9; }
+  .tab.group-6 { --group-color: #9b6bd3; }
+  .tab.asleep:not(.active) .title, .tab.asleep:not(.active) .favicon { opacity: 0.52; }
+  .tab.asleep:not(.active)::after {
+    content: "zzz";
+    font-size: 9px;
+    opacity: 0.55;
+    margin-left: 4px;
+    letter-spacing: -0.5px;
+  }
+  .tab.pinned { flex: 0 0 42px; min-width: 42px; max-width: 48px; padding: 0 10px; justify-content: center; }
+  body:not(.vertical) .tab.pinned .title, body:not(.vertical) .tab.pinned .close { display: none; }
+  body.vertical .tab.pinned { border-left: 2px solid var(--accent-color); }
+  .tab.drag-over { outline: 1px dashed var(--accent-ring); }
+  #bmbar {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 12px;
+    background: var(--bg-color);
+    border-bottom: 1px solid var(--border-color);
+    overflow-x: auto;
+    scrollbar-width: none;
+    z-index: 4;
+    position: relative;
+  }
+  body.bmbar #bmbar { display: flex; }
+  .bm-item {
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    color: var(--subtext-color);
+    white-space: nowrap;
+  }
+  .bm-item:hover { background: var(--hover-bg); color: var(--fg-color); }
 
   /* Open: grow from nothing and fade in. Close: shrink away. */
   .tab.entering {
@@ -704,6 +751,111 @@
                 0 8px 24px color-mix(in srgb, var(--accent-ring) 18%, transparent),
                 0 6px 18px var(--shadow-color);
   }
+
+  /* =========================================================================
+   * Sidebar layout: there is no top bar. The sidebar carries back / forward (top left),
+   * reload (top right), the address field, the tabs, and new tab / private tab / extensions /
+   * menu / close along the bottom. The page sits to its right inside the window border.
+   * ========================================================================= */
+  :root { --win-border: 3px; --amb1: var(--accent-color); --amb2: var(--accent-color); --amb3: var(--accent-color); }
+  #side {
+    position: fixed;
+    left: var(--win-border);
+    top: var(--win-border);
+    bottom: var(--win-border);
+    width: var(--sidebar-w);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 6px 4px;
+    background: var(--sidebar-bg);
+    z-index: 5;
+    transition: width 320ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth);
+  }
+  body.fx #side { background: color-mix(in srgb, var(--sidebar-bg) 40%, transparent); }
+  #side-top, #side-bottom { flex: none; display: flex; align-items: center; gap: 2px; }
+  #side-top { height: 34px; }
+  #side-bottom { height: 34px; }
+  #side .spacer { flex: 1 1 0; min-width: 4px; align-self: stretch; }
+  #side #field { flex: none; width: 100%; min-width: 0; max-width: none; height: 34px; margin: 0; box-sizing: border-box; }
+  #side #exts { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
+  #side #close { width: 34px; height: 30px; border-radius: var(--border-radius); margin: 0; }
+  body.vertical #tabs, #side #tabs {
+    position: relative;
+    inset: auto;
+    width: auto;
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent !important;
+    transform: none !important;
+  }
+  #side #sidebar-toggle, #side #pin { position: static; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; }
+  #side #pin { display: none; }
+  body.flyout #side #pin { display: grid; }
+  body.flyout #side #sidebar-toggle { display: none; }
+
+  /* Collapsed: a narrow icon column. */
+  body.collapsed #side { width: var(--sidebar-collapsed-w); }
+  body.collapsed #side #field, body.collapsed #side #exts, body.collapsed #side .spacer { display: none; }
+  body.collapsed #side-top, body.collapsed #side-bottom { flex-direction: column; height: auto; }
+
+  /* Auto-hide: a thin strip; hovering it slides the whole panel out (the flyout webview). */
+  body.autohide:not(.flyout) #side { width: 6px; padding: 0; overflow: hidden; }
+  body.autohide:not(.flyout) #side > * { visibility: hidden; }
+  body.autohide:not(.flyout) #side:hover { background: var(--accent-color); }
+  body.flyout #side {
+    left: 0;
+    top: 0;
+    bottom: 0;
+    transform: translateX(-104%);
+    transition: transform 280ms var(--anim-bezier), background-color var(--theme-fade);
+    background:
+      radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--accent-color) calc(var(--fx-gradient) * 18%), transparent), transparent),
+      var(--sidebar-bg);
+  }
+  body.flyout.open #side { transform: none; }
+  body.flyout.open.closing #side { transform: translateX(-104%); transition-duration: 200ms; }
+  body.flyout.open.closing #tabs { transform: none !important; }
+
+  /* The bookmarks bar runs along the top of the page, right of the sidebar. */
+  body.bmbar #bmbar {
+    position: fixed;
+    left: var(--content-left);
+    right: var(--win-border);
+    top: var(--win-border);
+    background: transparent;
+  }
+
+  /* Private tabs: dimmed, with text toned to match. */
+  .tab.private { background: color-mix(in srgb, var(--fg-color) 10%, transparent); color: var(--subtext-color); }
+  .tab.private .title { opacity: 0.8; }
+  .tab.private .favicon { filter: grayscale(1) opacity(0.7); }
+  .tab.private.active { background: color-mix(in srgb, var(--fg-color) 22%, transparent); color: var(--fg-color); }
+  #field.private { background: color-mix(in srgb, var(--fg-color) 12%, var(--field-bg)); }
+
+  /* Window border: a gradient ring from the theme accent through the page's ambient colors,
+     slowly turning. */
+  @property --border-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  #win-border {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    pointer-events: none;
+    padding: var(--win-border);
+    background: conic-gradient(from var(--border-angle),
+      var(--accent-color), var(--amb1), var(--amb2), var(--accent-color), var(--amb3), var(--accent-color));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: border-turn 24s linear infinite;
+    transition: opacity 600ms;
+  }
+  body.flyout #win-border { display: none; }
+  body.no-anim #win-border { animation: none; }
+  @keyframes border-turn { to { --border-angle: 360deg; } }
 </style>
 <!-- Injected user stylesheet from ~/.config/chickenwm/browser.css -->
 <style id="user-theme"></style>
@@ -719,42 +871,56 @@
   <div class="grip" id="grip-nw"></div>
   <div class="grip" id="grip-ne"></div>
 
-  <div id="row">
-    <button class="btn" id="back" title="Back (Alt+Left)">&#x2190;</button>
-    <button class="btn" id="fwd" title="Forward (Alt+Right)">&#x2192;</button>
-    <div class="spacer"></div>
+  <div id="win-border" aria-hidden="true"></div>
+
+  <!-- Everything lives in the sidebar: navigation on top, the address field, the tabs, and the
+       window's controls along the bottom. -->
+  <div id="side">
+    <div id="side-top">
+      <button class="btn" id="back" title="Back (Alt+Left)">&#x2190;</button>
+      <button class="btn" id="fwd" title="Forward (Alt+Right)">&#x2192;</button>
+      <div class="spacer"></div>
+      <button class="btn" id="reload" title="Reload (Ctrl+R)">&#x21bb;</button>
+    </div>
     <div id="field">
       <div id="shield" title="Ad &amp; tracker blocking">&#x25c8; <span id="blocked">0</span></div>
       <input id="addr" spellcheck="false" placeholder="Search or enter website name">
-      <button id="reload" title="Reload (Ctrl+R)">&#x21bb;</button>
+      <button id="star" title="Bookmark this page (Ctrl+D)">&#x2606;</button>
       <div id="progress"></div>
     </div>
-    <div class="spacer"></div>
-    <div id="exts"></div>
-    <button class="btn" id="newtab" title="New tab (Ctrl+T)">&#x2b;</button>
-    <button class="btn" id="menu-btn" title="Customize and control chickenbrowser">
-      <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
-        <rect y="0" width="16" height="2" rx="1"/>
-        <rect y="5" width="16" height="2" rx="1"/>
-        <rect y="10" width="16" height="2" rx="1"/>
-      </svg>
-    </button>
-    <button id="close" title="Close window">&#x2715;</button>
+    <div id="tabs"><div id="indicator"></div></div>
+    <div id="side-bottom">
+      <button id="sidebar-toggle" title="Collapse / expand tabs">&#x00ab;</button>
+      <button id="pin" title="Keep the tab sidebar open (turn off auto-hide)">&#x1f4cc;</button>
+      <button class="btn" id="newtab" title="New tab (Ctrl+T)">&#x2b;</button>
+      <button class="btn" id="private-tab" title="New private tab (Ctrl+Shift+N)">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><path d="M1 2.5C1 1.6 1.8 1 2.7 1.2L9 2.6l6.3-1.4C16.2 1 17 1.6 17 2.5V5c0 3.3-2.2 6-5 6-1.5 0-2.4-1-3-2-.6 1-1.5 2-3 2-2.8 0-5-2.7-5-6zm4 3.2a1.6 1.6 0 1 0 0 .1zm8 0a1.6 1.6 0 1 0 0 .1z"/></svg>
+      </button>
+      <div id="exts"></div>
+      <button class="btn" id="menu-btn" title="Customize and control Hen Browser">
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
+          <rect y="0" width="16" height="2" rx="1"/>
+          <rect y="5" width="16" height="2" rx="1"/>
+          <rect y="10" width="16" height="2" rx="1"/>
+        </svg>
+      </button>
+      <div class="spacer"></div>
+      <button id="close" title="Close window">&#x2715;</button>
+    </div>
   </div>
 
-  <div id="tabs"><div id="indicator"></div></div>
-  <button id="sidebar-toggle" title="Collapse / expand tabs">&#x00ab;</button>
-  <button id="pin" title="Keep the tab sidebar open (turn off auto-hide)">&#x1f4cc; Keep open</button>
+  <div id="bmbar"></div>
 
 <script>
   const post = (m) => window.ipc.postMessage(JSON.stringify(m));
   const $ = (id) => document.getElementById(id);
-  const tabsEl = $("tabs"), addr = $("addr"), field = $("field"), indicator = $("indicator");
-  const flyout = !!window.__CHICKEN_FLYOUT;
+  const tabsEl = $("tabs"), addr = $("addr"), field = $("field"), indicator = $("indicator"), bmbarEl = $("bmbar");
+  const flyout = !!window.__HEN_FLYOUT;
   if (flyout) document.body.classList.add("flyout");
   let autohide = false;
   let currentUrl = "";
   let vertical = false;
+  let dragTabId = null;
 
   const pretty = (url) => {
     try {
@@ -771,17 +937,19 @@
   $("back").onclick = () => post({ cmd: "back" });
   $("fwd").onclick = () => post({ cmd: "forward" });
   $("reload").onclick = () => post({ cmd: "reload" });
+  $("private-tab").onclick = () => post({ cmd: "new_private_tab" });
+  $("star").onclick = () => post({ cmd: "toggle_bookmark" });
   $("shield").onclick = () => post({ cmd: "toggle_site_adblock" });
   $("sidebar-toggle").onclick = () => post({ cmd: "toggle_sidebar" });
   $("pin").onclick = () => post({ cmd: "toggle_sidebar_autohide" });
 
   // Auto-hide: hovering the strip opens the panel (short delay so passing by doesn't).
   let peekTimer = null;
-  tabsEl.addEventListener("mouseenter", () => {
+  $("side").addEventListener("mouseenter", () => {
     if (flyout || !autohide || !vertical) return;
     peekTimer = setTimeout(() => post({ cmd: "sidebar_peek", show: true }), 70);
   });
-  tabsEl.addEventListener("mouseleave", () => { clearTimeout(peekTimer); });
+  $("side").addEventListener("mouseleave", () => { clearTimeout(peekTimer); });
   // Flyout: slide back in when the pointer leaves the panel.
   let closeTimer = null;
   if (flyout) {
@@ -809,7 +977,7 @@
   }
 
   // Dragging empty chrome space moves the window; double-click toggles maximize.
-  const isChrome = (t) => t === $("row") || (!vertical && t === tabsEl) || t.classList.contains("spacer");
+  const isChrome = (t) => t === $("side") || t === $("side-top") || t === $("side-bottom") || t.classList.contains("spacer");
   document.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || !isChrome(e.target)) return;
     e.preventDefault();
@@ -822,7 +990,7 @@
   const hideSuggest = () => { suggestions = []; suggestSel = -1; post({ cmd: "suggest_hide" }); };
   const pickSuggest = (n) => {
     suggestSel = n;
-    addr.value = n >= 0 ? suggestions[n].url : typed;
+    addr.value = n >= 0 ? (suggestions[n].tab ? suggestions[n].title : suggestions[n].url) : typed;
     post({ cmd: "suggest_sel", sel: n });
   };
   addr.addEventListener("input", () => {
@@ -830,7 +998,7 @@
     suggestSel = -1;
     if (!typed.trim()) { hideSuggest(); return; }
     const r = field.getBoundingClientRect();
-    post({ cmd: "suggest", text: typed, x: r.left, w: r.width });
+    post({ cmd: "suggest", text: typed, x: r.left, w: r.width, y: r.bottom });
   });
   addr.addEventListener("keydown", (e) => {
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && suggestions.length) {
@@ -839,7 +1007,13 @@
       pickSuggest(e.key === "ArrowDown" ? (suggestSel + 1 >= n ? -1 : suggestSel + 1) : (suggestSel < 0 ? n - 1 : suggestSel - 1));
       return;
     }
-    if (e.key === "Enter") { post({ cmd: "navigate", input: addr.value }); hideSuggest(); addr.blur(); }
+    if (e.key === "Enter") {
+      const picked = suggestSel >= 0 ? suggestions[suggestSel] : null;
+      // "@…" with nothing picked: the first matching tab.
+      const tab = picked ? picked.tab : (typed.startsWith("@") && suggestions[0] ? suggestions[0].tab : null);
+      post(tab ? { cmd: "switch_to_tab", id: tab } : { cmd: "navigate", input: addr.value });
+      hideSuggest(); addr.blur();
+    }
     if (e.key === "Escape") {
       if (suggestions.length) { addr.value = typed; hideSuggest(); return; }
       addr.blur(); post({ cmd: "focus_page" });
@@ -861,17 +1035,45 @@
     const el = document.createElement("div");
     el.className = "tab entering";
     el.dataset.id = t.id;
+    el.draggable = true;
     el.innerHTML = '<span class="favicon"></span><span class="title"></span><button class="close" title="Close tab (Ctrl+W)">&#x2715;</button>';
+    el.ondragstart = (e) => {
+      dragTabId = Number(el.dataset.id);
+      e.dataTransfer.effectAllowed = "move";
+    };
+    el.ondragover = (e) => {
+      e.preventDefault();
+      el.classList.add("drag-over");
+    };
+    el.ondragleave = () => el.classList.remove("drag-over");
+    el.ondrop = (e) => {
+      e.preventDefault();
+      el.classList.remove("drag-over");
+      const toId = Number(el.dataset.id);
+      if (dragTabId !== null && dragTabId !== toId) {
+        post({ cmd: "reorder_tab", from_id: dragTabId, to_id: toId });
+      }
+      dragTabId = null;
+    };
     el.onmousedown = (e) => {
       const id = Number(el.dataset.id);
       if (e.button === 1) { post({ cmd: "close_tab", id }); e.preventDefault(); }
       else if (e.button === 0 && !e.target.classList.contains("close")) {
         if (e.detail === 2 && !vertical) post({ cmd: "toggle_maximize" });
         else if (!el.classList.contains("active")) post({ cmd: "switch_tab", id });
-        else if (!vertical) post({ cmd: "drag_window" });
       }
     };
     el.querySelector(".close").onclick = (e) => { e.stopPropagation(); post({ cmd: "close_tab", id: Number(el.dataset.id) }); };
+    // Right-click cycles colour group; Shift+Right-click pins/unpins the tab.
+    el.oncontextmenu = (e) => {
+      e.preventDefault();
+      if (e.shiftKey) {
+        post({ cmd: "pin_tab", id: Number(el.dataset.id) });
+        return;
+      }
+      const g = (Number(el.dataset.group || 0) + 1) % 7;
+      post({ cmd: "set_tab_group", id: Number(el.dataset.id), group: g });
+    };
     requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("entering")));
     return el;
   }
@@ -906,8 +1108,6 @@
     indicator.classList.add("ready");
   }
 
-  // Switching tabs: the highlight first stretches to span both tabs, then contracts onto the new
-  // one, so it reads as one elastic piece rather than a slide.
   function hopIndicator(from, to) {
     if (document.body.classList.contains("no-anim") || !from || !to || !indicator.classList.contains("ready")) {
       moveIndicator();
@@ -948,7 +1148,6 @@
     fxRoot.setProperty("--fx-ambient", a);
     document.body.classList.toggle("fx", g > 0 || n > 0 || a > 0);
 
-    // Page colors → the four glows (dominant color at the top centre, the rest around it).
     colors = Array.isArray(colors) ? colors : [];
     const sig = JSON.stringify(colors);
     if (sig === ambientSig) return;
@@ -961,8 +1160,8 @@
     amb.setProperty("--amb2", rgb(pick(1), 0.7));
     amb.setProperty("--amb3", rgb(pick(2), 0.7));
     amb.setProperty("--amb4", rgb(pick(3), 0.6));
-    // Colors changing every second or two (video, animations) follow quickly and quietly; the
-    // bloom + wash is for a new page, so it isn't replayed within a few seconds of the last one.
+    // The window border reads these too.
+    for (const k of ["--amb1", "--amb2", "--amb3"]) fxRoot.setProperty(k, colors.length ? amb.getPropertyValue(k) : "var(--accent-color)");
     const t = performance.now();
     ambEl.classList.toggle("live", t - (applyFx.lastChange || 0) < 4000);
     applyFx.lastChange = t;
@@ -970,7 +1169,7 @@
       applyFx.lastShift = t;
       amb.setProperty("--wash", rgb(colors[0], 0.9));
       ambEl.classList.remove("shift");
-      void ambEl.offsetWidth; // restart the one-shot animations
+      void ambEl.offsetWidth;
       ambEl.classList.add("shift");
       clearTimeout(applyFx.shiftTimer);
       applyFx.shiftTimer = setTimeout(() => ambEl.classList.remove("shift"), 4200);
@@ -992,8 +1191,13 @@
       prev = el;
       el.classList.toggle("active", t.active);
       el.classList.toggle("loading", t.loading);
-      el.classList.toggle("asleep", !!t.asleep);
-      el.title = t.title ? `${t.title}\n${t.url}` : t.url;
+      el.classList.toggle("private", !!t.private);
+      el.classList.toggle("asleep", !!(t.asleep || t.sleeping));
+      el.classList.toggle("pinned", !!t.pinned);
+      el.dataset.group = t.group || 0;
+      for (let g = 1; g <= 6; g++) el.classList.toggle("group-" + g, t.group === g);
+      const sleepTag = (t.asleep || t.sleeping) ? " (sleeping)" : (t.never_sleep ? " (never sleep)" : "");
+      el.title = (t.title ? `${t.title}\n${t.url}` : t.url) + sleepTag + "\nRight-click: colour · Shift+Right-click: pin";
       const title = t.title || pretty(t.url) || "New Tab";
       const titleEl = el.querySelector(".title");
       if (titleEl.textContent !== title) titleEl.textContent = title;
@@ -1008,7 +1212,6 @@
       setTimeout(() => { el.remove(); moveIndicator(); }, 260);
     }
     if (switched) hopIndicator(fromEl, tabEls.get(nextActive));
-    // Keep the highlight glued to its tab while widths animate.
     const until = performance.now() + 460;
     const follow = () => { moveIndicator(); if (performance.now() < until) requestAnimationFrame(follow); };
     requestAnimationFrame(follow);
@@ -1026,11 +1229,29 @@
       document.body.classList.toggle("vertical", vertical);
       document.body.classList.toggle("autohide", !flyout && autohide);
       document.body.classList.toggle("collapsed", !flyout && !!L.collapsed);
+      document.body.classList.toggle("bmbar", !flyout && !!L.bookmarks_bar);
       document.body.classList.toggle("no-anim", L.animations === false);
       applyFx(s.fx, s.ambient);
-      // Where the page sits (matches content_rect in main.rs), for the shadow around it.
       fxRoot.setProperty("--content-left", (vertical && !flyout ? (L.sidebar || 0) : 0) + "px");
-      fxRoot.setProperty("--content-top", (vertical ? 48 : 82) + "px");
+      fxRoot.setProperty("--win-border", (L.border ?? 3) + "px");
+      fxRoot.setProperty("--content-top", (L.top || (vertical ? 48 : 82)) + "px");
+
+      if (!flyout && L.bookmarks_bar) {
+        const bms = s.bookmarks || [];
+        const bsig = JSON.stringify(bms);
+        if (bmbarEl.dataset.sig !== bsig) {
+          bmbarEl.dataset.sig = bsig;
+          bmbarEl.innerHTML = "";
+          for (const b of bms) {
+            const btn = document.createElement("button");
+            btn.className = "bm-item";
+            btn.textContent = b.title || pretty(b.url);
+            btn.title = b.url;
+            btn.onclick = () => post({ cmd: "navigate", input: b.url });
+            bmbarEl.appendChild(btn);
+          }
+        }
+      }
 
       renderTabs(s.tabs);
       const active = s.tabs.find((t) => t.active);
@@ -1038,6 +1259,10 @@
       currentUrl = s.url || "";
       if (document.activeElement !== addr) addr.value = pretty(currentUrl);
       field.classList.toggle("loading", !!(active && active.loading));
+      field.classList.toggle("private", !!(active && active.private));
+      $("reload").classList.toggle("loading", !!(active && active.loading));
+      $("back").disabled = !s.can_back;
+      $("fwd").disabled = !s.can_forward;
 
       const shield = $("shield");
       if (s.blocked > lastBlocked) {
@@ -1045,6 +1270,11 @@
         void shield.offsetWidth;
         shield.classList.add("bump");
       }
+      const star = $("star");
+      star.hidden = s.bookmarked === null || s.bookmarked === undefined;
+      star.classList.toggle("on", !!s.bookmarked);
+      star.innerHTML = s.bookmarked ? "&#x2605;" : "&#x2606;";
+      star.title = s.bookmarked ? "Remove bookmark (Ctrl+D)" : "Bookmark this page (Ctrl+D)";
       lastBlocked = s.blocked;
       $("blocked").textContent = s.blocked;
       const siteOff = s.site_adblock === false;
@@ -1071,6 +1301,13 @@
       }
     },
     focusAddress() { addr.focus(); addr.select(); },
+    // Ctrl+Shift+A: search open tabs.
+    tabSearch() {
+      addr.focus();
+      addr.value = "@"; typed = "@"; suggestSel = -1;
+      const r = field.getBoundingClientRect();
+      post({ cmd: "suggest", text: "@", x: r.left, w: r.width, y: r.bottom });
+    },
     suggestions(list) { if (document.activeElement === addr) { suggestions = list; suggestSel = -1; } },
     peek() {
       clearTimeout(closeTimer);

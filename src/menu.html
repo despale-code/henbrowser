@@ -84,6 +84,14 @@
     font-size: 11px;
     flex: none;
   }
+  .ram {
+    margin-top: auto;
+    padding: 8px 10px 2px;
+    border-top: 1px solid var(--border-color);
+    color: var(--subtext-color);
+    font-size: 12px;
+    flex: none;
+  }
   .sep {
     height: 1px;
     background: var(--border-color);
@@ -165,22 +173,44 @@
     <span class="shortcut">Ctrl+P</span>
   </div>
   <div class="sep"></div>
+  <div class="item" data-action="open_history">
+    <span class="icon">&#x231a;</span>
+    <span class="label">History</span>
+    <span class="shortcut">Ctrl+H</span>
+  </div>
+  <div class="item" data-action="open_downloads">
+    <span class="icon">&#x2193;</span>
+    <span class="label">Downloads</span>
+    <span class="shortcut">Ctrl+J</span>
+  </div>
+  <div class="item" data-action="reader">
+    <span class="icon">&#x00b6;</span>
+    <span class="label">Reader mode</span>
+    <span class="shortcut">F9</span>
+  </div>
+  <div class="item" data-action="pip">
+    <span class="icon">&#x29c9;</span>
+    <span class="label">Picture in picture</span>
+    <span class="shortcut">Ctrl+Shift+P</span>
+  </div>
+  <div class="item" data-action="toggle_site_dark">
+    <span class="icon">&#x25d1;</span>
+    <span class="label">Force dark on this site</span>
+  </div>
+  <div class="sep"></div>
   <div class="item" data-action="clear_data">
     <span class="icon">&#x1f5d1;</span>
     <span class="label">Clear browsing data...</span>
     <span class="shortcut">Ctrl+Shift+Del</span>
   </div>
-  <div class="item" data-action="proton_pass">
-    <span class="icon">&#x1f511;</span>
-    <span class="label">Proton Pass</span>
-  </div>
   <div class="item" data-action="toggle_dark">
     <span class="icon">&#x25d0;</span>
     <span class="label">Light / dark mode</span>
   </div>
-  <div class="item" data-action="toggle_vertical_tabs">
-    <span class="icon">&#x2590;</span>
-    <span class="label">Vertical tabs</span>
+  <div class="item" data-action="new_private_tab">
+    <span class="icon">&#x25d4;</span>
+    <span class="label">New private tab</span>
+    <span class="shortcut">Ctrl+Shift+N</span>
   </div>
   <div class="item" data-action="devtools">
     <span class="icon">&#x2692;</span>
@@ -198,6 +228,7 @@
     <span class="label">Exit</span>
     <span class="shortcut">Alt+F4</span>
   </div>
+  <div class="ram" id="ram" title="Memory used by all of the browser's processes">RAM …</div>
 </div>
 
 <script>
@@ -214,6 +245,9 @@
   document.getElementById("zoom-in").onclick = () => post({ cmd: "zoom_in" });
   document.getElementById("zoom-level").onclick = () => post({ cmd: "zoom_reset" });
   document.getElementById("fullscreen").onclick = () => post({ cmd: "toggle_maximize" });
+
+  window.setRam = (text) => { document.getElementById("ram").textContent = "RAM " + text; };
+  if (window.__ramText) setRam(window.__ramText);
 
   window.setZoom = (z) => {
     document.getElementById("zoom-level").textContent = Math.round(z * 100) + "%";

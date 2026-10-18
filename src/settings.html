@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Settings — chickenbrowser</title>
+<title>Settings — Hen Browser</title>
 <style>
   :root {
     --bg-color: #f0e6d3;
@@ -253,6 +253,20 @@
     border-color: rgba(46, 125, 50, 0.3);
   }
   /* Extension Card */
+  #ext-input {
+    height: 32px;
+    padding: 0 10px;
+    margin-right: 8px;
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--card-bg);
+    color: inherit;
+    font: inherit;
+  }
+  #btn-ext-folder { margin-left: 8px; }
+  #ext-notice:empty { display: none; }
+  #ext-list { margin-top: 12px; }
   .ext-card {
     display: flex;
     align-items: center;
@@ -341,7 +355,7 @@
     </div>
     <div class="nav-item" data-tab="about">
       <span class="nav-icon">&#x2139;</span>
-      <span>About chickenbrowser</span>
+      <span>About Hen Browser</span>
     </div>
   </div>
 
@@ -391,7 +405,7 @@
         <div class="card-row" id="mem-restart-row" hidden>
           <div class="card-info">
             <div class="card-title">Restart needed</div>
-            <div class="card-desc">Some changes only apply after restarting chickenbrowser. Open tabs are reopened.</div>
+            <div class="card-desc">Some changes only apply after restarting Hen Browser. Open tabs are reopened.</div>
           </div>
           <button class="btn" id="btn-restart">Restart now</button>
         </div>
@@ -566,13 +580,6 @@
         </div>
         <div class="card-row">
           <div class="card-info">
-            <div class="card-title">Vertical tabs</div>
-            <div class="card-desc">Show tabs in a sidebar on the left. Collapse it to icons with the &#x00ab; button.</div>
-          </div>
-          <label class="switch"><input type="checkbox" data-ap="vertical_tabs"><span class="knob"></span></label>
-        </div>
-        <div class="card-row">
-          <div class="card-info">
             <div class="card-title">Auto-hide vertical tabs</div>
             <div class="card-desc">The sidebar tucks away to a thin strip; hover the left edge to slide it out over the page</div>
           </div>
@@ -635,28 +642,31 @@
     <!-- Extensions Section -->
     <div class="section" id="sec-extensions">
       <h1>Extensions</h1>
-      <div class="ext-card">
-        <div class="ext-icon">&#x1f511;</div>
-        <div class="ext-details">
-          <div class="ext-name">
-            <span>Proton Pass: Free Password Manager</span>
-            <span class="badge success">Enabled</span>
+      <div class="card">
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Add an extension</div>
+            <div class="card-desc">Paste a Chrome Web Store link or extension id, or the path to a .crx, .zip or unpacked folder. Or just use Or open a Web Store page and click &ldquo;Add to Hen Browser&rdquo; in the toolbar.ldquo;Add to ChromeOr open a Web Store page and click &ldquo;Add to Hen Browser&rdquo; in the toolbar.rdquo; on the Chrome Web Store.</div>
           </div>
-          <div class="ext-ver">Version 1.42.0 &bull; Chromium MV3 Extension</div>
-          <div class="ext-path">~/.config/chickenwm/chickenbrowser/extensions/proton-pass</div>
         </div>
-        <button class="btn" id="btn-open-pass">Open popup</button>
+        <div class="card-row">
+          <input id="ext-input" spellcheck="false" placeholder="https://chromewebstore.google.com/detail/… or C:\path\to\extension.crx" style="flex:1">
+          <button class="btn" id="btn-ext-install">Install</button>
+          <button class="btn secondary" id="btn-ext-folder">Open folder</button>
+        </div>
+        <div class="card-desc" id="ext-notice" style="padding:0 16px 12px"></div>
       </div>
+      <div id="ext-list"></div>
     </div>
 
     <!-- About Section -->
     <div class="section" id="sec-about">
-      <h1>About chickenbrowser</h1>
+      <h1>About Hen Browser</h1>
       <div class="card">
         <div class="card-row">
           <div class="card-info">
-            <div class="card-title">chickenbrowser</div>
-            <div class="card-desc">Version 0.1.0 (64-bit) &bull; Built for HyperWin</div>
+            <div class="card-title">Hen Browser</div>
+            <div class="card-desc">Version 0.1.0 (64-bit) &bull; Part of ChickenWM</div>
           </div>
           <span class="badge">v0.1.0</span>
         </div>
@@ -697,9 +707,63 @@
     post({ cmd: "edit_css" });
   };
 
-  document.getElementById("btn-open-pass").onclick = () => {
-    post({ cmd: "proton_pass" });
+  const installExt = () => {
+    const input = document.getElementById("ext-input").value.trim();
+    if (input) post({ cmd: "install_extension", input });
   };
+  document.getElementById("btn-ext-install").onclick = installExt;
+  document.getElementById("ext-input").onkeydown = (e) => { if (e.key === "Enter") installExt(); };
+  document.getElementById("btn-ext-folder").onclick = () => post({ cmd: "open_extensions_folder" });
+
+  // Installed extensions (rebuilt only when the list changes, so buttons don't flicker).
+  function renderExtensions(state) {
+    document.getElementById("ext-notice").textContent = state.ext_notice || "";
+    const list = document.getElementById("ext-list");
+    const exts = state.extensions || [];
+    const sig = JSON.stringify(exts.map((e) => [e.id, e.version]));
+    if (list.dataset.sig === sig) return;
+    list.dataset.sig = sig;
+    list.innerHTML = "";
+    if (!exts.length) {
+      const empty = document.createElement("div");
+      empty.className = "card-desc";
+      empty.textContent = "No extensions installed.";
+      list.appendChild(empty);
+    }
+    for (const x of exts) {
+      const card = document.createElement("div");
+      card.className = "ext-card";
+      const icon = document.createElement("div");
+      icon.className = "ext-icon";
+      if (x.icon) {
+        const img = document.createElement("img");
+        img.src = x.icon;
+        img.style.cssText = "width:28px;height:28px";
+        icon.appendChild(img);
+      } else {
+        icon.textContent = "\u{1f9e9}";
+      }
+      const details = document.createElement("div");
+      details.className = "ext-details";
+      details.innerHTML = '<div class="ext-name"><span></span><span class="badge success">Enabled</span></div>'
+        + '<div class="ext-ver"></div><div class="ext-path"></div>';
+      details.querySelector(".ext-name span").textContent = x.name;
+      details.querySelector(".ext-ver").textContent = (x.version ? "Version " + x.version + " • " : "") + x.id;
+      details.querySelector(".ext-path").textContent = x.dir;
+      const open = document.createElement("button");
+      open.className = "btn";
+      open.textContent = "Open popup";
+      open.onclick = () => post({ cmd: "ext_popup", id: x.id });
+      const remove = document.createElement("button");
+      remove.className = "btn secondary";
+      remove.textContent = "Remove";
+      remove.onclick = () => {
+        if (confirm("Remove " + x.name + "? Its data in this browser is deleted too.")) post({ cmd: "remove_extension", id: x.id });
+      };
+      card.append(icon, details, open, remove);
+      list.appendChild(card);
+    }
+  }
 
   document.getElementById("search-select").onchange = (e) => {
     post({ cmd: "set_search_engine", url: e.target.value });
@@ -786,6 +850,7 @@
 
   window.hbSettings = {
     render(state) {
+      renderExtensions(state);
       if (state.appearance) {
         appearance = state.appearance;
         systemDark = !!state.system_dark;

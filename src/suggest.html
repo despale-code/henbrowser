@@ -1,3 +1,4 @@
+        t.textContent = (it.bookmark ? "2605 " : "") + (it.title || bare(it.url));
 <!doctype html>
 <html>
 <head>
@@ -57,15 +58,15 @@
         row.className = "row";
         const t = document.createElement("span");
         t.className = "title";
-        t.textContent = it.title || bare(it.url);
+        t.textContent = (it.tab ? "⇥ " : it.bookmark ? "★ " : "") + (it.title || bare(it.url));
         const u = document.createElement("span");
         u.className = "url";
-        u.textContent = it.title ? bare(it.url) : "";
+        u.textContent = it.tab ? "Switch to tab" : it.title ? bare(it.url) : "";
         row.append(t, u);
         // mousedown, not click: the address field blurs (and hides this) as focus moves here.
         row.addEventListener("mousedown", (e) => {
           e.preventDefault();
-          post({ cmd: "navigate", input: it.url });
+          post(it.tab ? { cmd: "switch_to_tab", id: it.tab } : { cmd: "navigate", input: it.url });
           post({ cmd: "suggest_hide" });
         });
         list.appendChild(row);

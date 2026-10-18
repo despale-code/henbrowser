@@ -1,6 +1,6 @@
 //! Built-in network ad/tracker blocking.
 //!
-//! EasyList + EasyPrivacy are downloaded into `~/.config/chickenwm/chickenbrowser/adblock/` (refreshed
+//! EasyList + EasyPrivacy are downloaded into `~/.config/chickenwm/henbrowser/adblock/` (refreshed
 //! every few days), compiled into Brave's `adblock` engine on a background thread, and consulted
 //! for every sub-resource request a tab makes via WebView2's `WebResourceRequested` event.
 //! Top-level page loads are never blocked, so a false positive can't leave you on an error page.
@@ -153,7 +153,7 @@ pub fn install(
                     let response = env.CreateWebResourceResponse(
                         None,
                         403,
-                        &HSTRING::from("Blocked by chickenbrowser"),
+                        &HSTRING::from("Blocked by Hen Browser"),
                         &HSTRING::new(),
                     )?;
                     args.SetResponse(&response)?;

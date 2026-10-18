@@ -1,4 +1,4 @@
-//! Copies `WebView2Loader.dll` next to the chickenbrowser executable.
+//! Copies `WebView2Loader.dll` next to the henbrowser executable.
 //!
 //! `webview2-com-sys` links the WebView2 loader dynamically but only copies the DLL into its own
 //! build directory, so without this the exe fails to start with STATUS_DLL_NOT_FOUND.
@@ -32,7 +32,7 @@ fn main() {
         .expect("webview2-com-sys not found in dependency graph");
     let dll = sys_dir.join(arch).join("WebView2Loader.dll");
 
-    // OUT_DIR is target/<profile>/build/chickenbrowser-<hash>/out; the exe lives in target/<profile>.
+    // OUT_DIR is target/<profile>/build/henbrowser-<hash>/out; the exe lives in target/<profile>.
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let profile_dir = out_dir.ancestors().nth(3).expect("unexpected OUT_DIR layout");
     std::fs::copy(&dll, profile_dir.join("WebView2Loader.dll"))

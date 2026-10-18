@@ -1,4 +1,4 @@
-//! Persisted browser settings (`~/.config/chickenwm/chickenbrowser/settings.json`), mainly the memory
+//! Persisted browser settings (`~/.config/chickenwm/henbrowser/settings.json`), mainly the memory
 //! options. Options marked "restart" become WebView2 browser arguments, which are fixed for the
 //! lifetime of the browser process; the rest apply live.
 
@@ -12,6 +12,43 @@ pub struct BrowserSettings {
     pub memory: MemorySettings,
     pub appearance: AppearanceSettings,
     pub privacy: PrivacySettings,
+    pub reader: ReaderSettings,
+    /// Per-site choices, keyed by `site_of` (`example.com`).
+    pub sites: std::collections::BTreeMap<String, SiteSettings>,
+}
+
+/// Reader mode typography settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ReaderSettings {
+    /// `serif`, `sans`, or `mono`.
+    pub font: String,
+    /// Column max-width in px (e.g. 560, 680, 820).
+    pub width: u32,
+    /// `match` (browser theme), `sepia`, `light`, or `dark`.
+    pub theme: String,
+}
+
+impl Default for ReaderSettings {
+    fn default() -> Self {
+        Self {
+            font: "serif".into(),
+            width: 680,
+            theme: "match".into(),
+        }
+    }
+}
+
+/// Remembered for one site.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SiteSettings {
+    /// Page zoom (1.0 = 100%); `None` = default.
+    pub zoom: Option<f64>,
+    /// Force a dark look on a site that has none.
+    pub force_dark: bool,
+    /// Never suspend or discard tabs on this site.
+    pub never_sleep: bool,
 }
 
 impl Default for BrowserSettings {
@@ -21,8 +58,14 @@ impl Default for BrowserSettings {
             memory: MemorySettings::preset("balanced").unwrap(),
             appearance: AppearanceSettings::default(),
             privacy: PrivacySettings::default(),
+            reader: ReaderSettings::default(),
+            sites: Default::default(),
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,6 +81,11 @@ pub struct AppearanceSettings {
     pub sidebar_collapsed: bool,
     /// Vertical tabs hide to a thin edge strip and slide out over the page on hover.
     pub sidebar_autohide: bool,
+    /// Show the bookmarks bar row in the toolbar.
+    pub show_bookmarks_bar: bool,
+    /// Show the search box on the start page (`about:newtab`).
+    #[serde(default = "default_true")]
+    pub start_show_search: bool,
     /// UI motion (tab open/close, sliding highlight, theme cross-fades).
     pub animations: bool,
     /// Soft, slowly drifting gradient behind the chrome, built from the ChickenWM theme colors.
@@ -62,6 +110,8 @@ impl Default for AppearanceSettings {
             vertical_tabs: false,
             sidebar_collapsed: false,
             sidebar_autohide: false,
+            show_bookmarks_bar: false,
+            start_show_search: true,
             animations: true,
             gradient: true,
             gradient_strength: 55,
@@ -127,6 +177,9 @@ pub struct MemorySettings {
     pub disable_background_networking: bool,
     /// Restart: V8 heap cap per renderer in MB (0 = default). Heavy web apps may crash below it.
     pub js_heap_limit_mb: u32,
+    /// Live: sites (host names, `www.` stripped) that should never be suspended or unloaded.
+    #[serde(default)]
+    pub never_sleep_sites: Vec<String>,
 }
 
 impl Default for MemorySettings {
@@ -149,6 +202,7 @@ impl MemorySettings {
             low_end_device_mode: false,
             disable_background_networking: true,
             js_heap_limit_mb: 0,
+            never_sleep_sites: Vec::new(),
         };
         Some(match name {
             "balanced" => base,

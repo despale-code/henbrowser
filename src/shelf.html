@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* The download shelf along the bottom of the window (old-Chrome style): one card per
+     download, newest on the left. Colors come from browser.css via the theme init script.
+     Each card's menu button opens a native menu (Pause/Resume, Browse in Explorer, Copy URL). */
+  :root {
+    --bg-color: #f0e6d3;
+    --surface-color: #fffcf5;
+    --fg-color: #2b1d14;
+    --subtext-color: #6b5545;
+    --accent-color: #3b2a1f;
+    --hover-bg: rgba(59, 42, 31, 0.09);
+    --press-bg: rgba(59, 42, 31, 0.18);
+    --border-color: rgba(59, 42, 31, 0.25);
+    --font-family: "DepartureMono Nerd Font Mono", "DepartureMono Nerd Font", "Cascadia Code", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-color);
+    color: var(--fg-color);
+    font-family: var(--font-family);
+    font-size: 12px;
+    user-select: none;
+    cursor: default;
+  }
+  #bar {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    border-top: 1px solid var(--border-color);
+  }
+  #items {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 6px;
+    overflow: hidden;
+  }
+  .dl {
+    position: relative;
+    flex: none;
+    width: 250px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 0 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--surface-color);
+    overflow: hidden;
+    transition: background-color 120ms;
+  }
+  .dl.done { cursor: pointer; }
+  .dl.done:hover { background: var(--hover-bg); }
+  .dl .text { flex: 1; min-width: 0; line-height: 1.25; }
+  .dl .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dl .status { color: var(--subtext-color); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dl.failed .status { color: #b3261e; }
+  .dl .bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--accent-color);
+    transition: width 200ms;
+  }
+  .dl.paused .bar { opacity: 0.4; }
+  .act {
+    flex: none;
+    height: 26px;
+    min-width: 24px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--subtext-color);
+    font: inherit;
+    cursor: pointer;
+  }
+  .act:hover { background: var(--hover-bg); color: var(--fg-color); }
+  .act:active { background: var(--press-bg); }
+  .act.more { height: 100%; border-left: 1px solid var(--border-color); border-radius: 0; }
+  #notice {
+    flex: none;
+    max-width: 360px;
+    color: var(--subtext-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #notice:empty { display: none; }
+  #all { border: 1px solid var(--border-color); }
+</style>
+</head>
+<body>
+<div id="bar">
+  <div id="items"></div>
+  <div id="notice"></div>
+  <button class="act" id="all" title="Open the downloads page (Ctrl+J)">Show all</button>
+  <button class="act" id="close" title="Close the download bar">&#x2715;</button>
+</div>
+<script>
+  const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+  const $ = (id) => document.getElementById(id);
+  $("all").onclick = () => post({ cmd: "open_downloads" });
+  $("close").onclick = () => post({ cmd: "shelf_close" });
+
+  const size = (n) => {
+    if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + " GB";
+    if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + " MB";
+    if (n >= 1 << 10) return Math.round(n / (1 << 10)) + " KB";
+    return n + " B";
+  };
+  const speedText = (bps) => {
+    if (bps >= 1 << 20) return (bps / (1 << 20)).toFixed(1) + " MB/s";
+    if (bps >= 1 << 10) return Math.round(bps / (1 << 10)) + " KB/s";
+    return Math.round(bps) + " B/s";
+  };
+  const fileName = (p, url) => (p || url || "download").split(/[\\/]/).pop();
+
+  // Download speed per id: a smoothed rate from successive byte counts.
+  const rates = new Map();
+  function sample(d) {
+    const now = performance.now();
+    const r = rates.get(d.id);
+    if (!r) { rates.set(d.id, { bytes: d.received, t: now, bps: 0 }); return; }
+    const dt = (now - r.t) / 1000;
+    if (dt < 0.25 || d.received < r.bytes) return;
+    const inst = (d.received - r.bytes) / dt;
+    r.bps = r.bps ? r.bps * 0.6 + inst * 0.4 : inst;
+    r.bytes = d.received;
+    r.t = now;
+  }
+  // No progress for a while: it isn't moving.
+  const currentSpeed = (id) => {
+    const r = rates.get(id);
+    return r && performance.now() - r.t < 2500 ? r.bps : 0;
+  };
+
+  function iconButton(label, title, onClick, extra) {
+    const b = document.createElement("button");
+    b.className = "act" + (extra ? " " + extra : "");
+    b.textContent = label;
+    b.title = title;
+    b.onclick = (e) => { e.stopPropagation(); onClick(b); };
+    return b;
+  }
+
+  function statusText(d) {
+    const progress = d.total ? `${size(d.received)} / ${size(d.total)}` : size(d.received);
+    switch (d.state) {
+      case "completed": return size(d.received || d.total);
+      case "cancelled": return "Cancelled";
+      case "interrupted": return d.can_resume ? "Failed • can resume" : "Failed";
+      case "paused": return "Paused • " + progress;
+      default: return progress + " • " + speedText(currentSpeed(d.id));
+    }
+  }
+
+  let state = { downloads: [] };
+
+  function render() {
+    $("notice").textContent = state.notice || "";
+    const items = $("items");
+    items.innerHTML = "";
+    for (const d of state.downloads || []) {
+      const el = document.createElement("div");
+      const running = d.state === "in_progress";
+      const paused = d.state === "paused";
+      const done = d.state === "completed";
+      const failed = d.state === "interrupted" || d.state === "cancelled";
+      el.className = "dl" + (done ? " done" : "") + (failed ? " failed" : "") + (paused ? " paused" : "");
+      el.title = d.path || d.url;
+      const text = document.createElement("div");
+      text.className = "text";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = fileName(d.path, d.url);
+      const status = document.createElement("div");
+      status.className = "status";
+      status.textContent = statusText(d);
+      text.append(name, status);
+      el.appendChild(text);
+      if (running || paused) {
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        bar.style.width = d.total ? Math.min(100, (d.received / d.total) * 100) + "%" : "30%";
+        el.appendChild(bar);
+      }
+      if (running || paused || (d.state === "interrupted" && d.can_resume)) {
+        el.appendChild(iconButton(running ? "⏸" : "▶", running ? "Pause" : "Resume",
+          () => post({ cmd: "pause_download", id: d.id })));
+      }
+      el.appendChild(iconButton("▾", "More", () => post({ cmd: "download_menu", id: d.id }), "more"));
+      if (done) el.onclick = () => post({ cmd: "open_download", id: d.id });
+      items.appendChild(el);
+    }
+  }
+
+  window.hbShelf = {
+    render(s) {
+      state = s;
+      for (const d of s.downloads || []) if (d.state === "in_progress") sample(d);
+      render();
+    },
+  };
+  // Keeps the speed readout honest when no progress events arrive.
+  setInterval(() => { if ((state.downloads || []).some((d) => d.state === "in_progress")) render(); }, 1000);
+  addEventListener("DOMContentLoaded", () => post({ cmd: "shelf_ready" }));
+</script>
+</body>
+</html>

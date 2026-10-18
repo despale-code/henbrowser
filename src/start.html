@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>New tab</title>
+<style>
+  :root {
+    --bg-color: #f0e6d3;
+    --surface-color: #fffcf5;
+    --field-bg: rgba(255, 252, 245, 0.85);
+    --fg-color: #2b1d14;
+    --subtext-color: #6b5545;
+    --faint-color: rgba(43, 29, 20, 0.45);
+    --accent-color: #3b2a1f;
+    --hover-bg: rgba(59, 42, 31, 0.12);
+    --border-color: rgba(59, 42, 31, 0.28);
+    --border-radius: 8px;
+    --font-family: "DepartureMono Nerd Font", "Departure Mono", ui-monospace, monospace;
+  }
+</style>
+<!--THEME-->
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg-color);
+    color: var(--fg-color);
+    font-family: var(--font-family);
+    font-size: 13px;
+    display: flex;
+    justify-content: center;
+  }
+  main { width: min(760px, 100% - 32px); padding-top: 18vh; }
+  form { display: flex; }
+  input {
+    flex: 1;
+    height: 44px;
+    padding: 0 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: var(--field-bg);
+    color: var(--fg-color);
+    font: inherit;
+    font-size: 15px;
+    outline: none;
+  }
+  input:focus { border-color: var(--accent-color); }
+  input::placeholder { color: var(--faint-color); }
+  h2 {
+    margin: 36px 0 10px;
+    font-size: 11px;
+    font-weight: normal;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--subtext-color);
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+  a.tile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: var(--surface-color);
+    color: var(--fg-color);
+    text-decoration: none;
+    transition: background 120ms;
+  }
+  a.tile:hover { background: var(--hover-bg); }
+  a.tile img { width: 16px; height: 16px; flex: none; }
+  a.tile span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .empty { color: var(--faint-color); }
+</style>
+</head>
+<body>
+<main>
+  <form action="<!--SEARCH-->" method="get" id="search">
+    <input name="q" placeholder="Search or type an address" autofocus autocomplete="off">
+  </form>
+  <!--SECTIONS-->
+</main>
+<script>
+  // A typed address goes straight there; anything else is a search.
+  document.getElementById("search").addEventListener("submit", (e) => {
+    const v = e.target.q.value.trim();
+    if (/^[a-z]+:\/\//i.test(v) || /^[^\s]+\.[a-z]{2,}(\/\S*)?$/i.test(v)) {
+      e.preventDefault();
+      location.href = /^[a-z]+:\/\//i.test(v) ? v : "https://" + v;
+    }
+  });
+</script>
+</body>
+</html>
