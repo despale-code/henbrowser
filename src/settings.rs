@@ -81,6 +81,8 @@ pub struct AppearanceSettings {
     pub sidebar_collapsed: bool,
     /// Vertical tabs hide to a thin edge strip and slide out over the page on hover.
     pub sidebar_autohide: bool,
+    /// Sidebar width in logical pixels (dragged at its right edge).
+    pub sidebar_width: f64,
     /// Show the bookmarks bar row in the toolbar.
     pub show_bookmarks_bar: bool,
     /// Show the search box on the start page (`about:newtab`).
@@ -110,6 +112,7 @@ impl Default for AppearanceSettings {
             vertical_tabs: false,
             sidebar_collapsed: false,
             sidebar_autohide: false,
+            sidebar_width: 240.0,
             show_bookmarks_bar: false,
             start_show_search: true,
             animations: true,

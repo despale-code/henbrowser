@@ -256,7 +256,9 @@ impl Browser {
             .with_bounds(bounds)
             .with_devtools(true)
             .with_ipc_handler(move |req| {
-                if ipc_allowed.get() {
+                // The settings page and our own `hen:` pages (served by the browser itself) may talk to it.
+                let internal = req.uri().host().is_some_and(|h| h.starts_with("hen."));
+                if ipc_allowed.get() || internal {
                     let _ = p_ipc.send_event(UserEvent::Ipc(req.body().clone()));
                 } else if req.uri().host() == Some("chromewebstore.google.com") {
                     // The store's "Add to Chrome" (see `internal::webstore_js`): only an install

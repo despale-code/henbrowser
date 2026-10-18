@@ -60,7 +60,9 @@
     transition: background-color 120ms;
   }
   .dl.done { cursor: pointer; }
-  .dl.done:hover { background: var(--hover-bg); }
+  .dl.done:hover, .dl.pending:hover { background: var(--hover-bg); }
+  .dl.pending { cursor: pointer; }
+  .dl.later { border-color: var(--accent-color); }
   .dl .text { flex: 1; min-width: 0; line-height: 1.25; }
   .dl .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dl .status { color: var(--subtext-color); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -155,14 +157,15 @@
     return b;
   }
 
-  function statusText(d) {
+  function statusText(d, openLater) {
     const progress = d.total ? `${size(d.received)} / ${size(d.total)}` : size(d.received);
+    const later = openLater ? " • opens when done" : "";
     switch (d.state) {
       case "completed": return size(d.received || d.total);
       case "cancelled": return "Cancelled";
       case "interrupted": return d.can_resume ? "Failed • can resume" : "Failed";
-      case "paused": return "Paused • " + progress;
-      default: return progress + " • " + speedText(currentSpeed(d.id));
+      case "paused": return "Paused • " + progress + later;
+      default: return progress + " • " + speedText(currentSpeed(d.id)) + later;
     }
   }
 
@@ -172,14 +175,17 @@
     $("notice").textContent = state.notice || "";
     const items = $("items");
     items.innerHTML = "";
+    const openLater = new Set(state.open_when_done || []);
     for (const d of state.downloads || []) {
       const el = document.createElement("div");
       const running = d.state === "in_progress";
       const paused = d.state === "paused";
       const done = d.state === "completed";
       const failed = d.state === "interrupted" || d.state === "cancelled";
-      el.className = "dl" + (done ? " done" : "") + (failed ? " failed" : "") + (paused ? " paused" : "");
-      el.title = d.path || d.url;
+      const later = openLater.has(d.id);
+      el.className = "dl" + (done ? " done" : "") + (failed ? " failed" : "") + (paused ? " paused" : "")
+        + (running || paused ? " pending" : "") + (later ? " later" : "");
+      el.title = done ? "Click to open" : (running || paused) ? (later ? "Opens when done (click to undo)" : "Click to open it when it finishes") : (d.path || d.url);
       const text = document.createElement("div");
       text.className = "text";
       const name = document.createElement("div");
@@ -187,7 +193,7 @@
       name.textContent = fileName(d.path, d.url);
       const status = document.createElement("div");
       status.className = "status";
-      status.textContent = statusText(d);
+      status.textContent = statusText(d, later);
       text.append(name, status);
       el.appendChild(text);
       if (running || paused) {
@@ -200,8 +206,13 @@
         el.appendChild(iconButton(running ? "⏸" : "▶", running ? "Pause" : "Resume",
           () => post({ cmd: "pause_download", id: d.id })));
       }
+      if (failed) {
+        el.appendChild(iconButton("↻", "Retry", () => post({ cmd: "retry_download", id: d.id })));
+      }
       el.appendChild(iconButton("▾", "More", () => post({ cmd: "download_menu", id: d.id }), "more"));
+      // A click on the card itself: open it now, or (still downloading) flag it to open when done.
       if (done) el.onclick = () => post({ cmd: "open_download", id: d.id });
+      else if (running || paused) el.onclick = () => post({ cmd: "toggle_open_when_done", id: d.id });
       items.appendChild(el);
     }
   }

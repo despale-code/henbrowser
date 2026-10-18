@@ -125,103 +125,295 @@ fn page(title: &str, theme: &str, body: &str, refresh_secs: Option<u32>) -> Stri
     )
 }
 
-fn day_label(secs: u64, now: u64) -> String {
-    let days_ago = now / 86_400 - secs / 86_400;
-    match days_ago {
-        0 => "Today".to_owned(),
-        1 => "Yesterday".to_owned(),
-        n if n < 7 => format!("{n} days ago"),
-        n if n < 30 => format!("{} weeks ago", n / 7),
-        n => format!("{} months ago", n / 30),
-    }
+/// History entries as JSON for the page (newest first, with each one's site for "forget site").
+pub fn history_json(entries: &[history::Entry]) -> String {
+    let mut sorted: Vec<&history::Entry> = entries.iter().collect();
+    sorted.sort_by(|a, b| b.last.cmp(&a.last));
+    let items: Vec<serde_json::Value> = sorted
+        .iter()
+        .take(3000)
+        .map(|e| {
+            serde_json::json!({
+                "url": e.url,
+                "title": e.title,
+                "visits": e.visits,
+                "last": e.last,
+                "site": crate::settings::site_of(&e.url).unwrap_or_default(),
+            })
+        })
+        .collect();
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".into()).replace("</", r"<\/")
 }
 
-/// `http://hen.history/?q=…`: visited pages, newest first, grouped by day, with
-/// "forget this site".
+/// `http://hen.history/?q=…`: visited pages, newest first, grouped by day. Search, removing a
+/// page, forgetting a site and clearing everything happen in the page (no reloads); the browser
+/// pushes the updated list back (`hbHistory.render`).
 pub fn history_page(data: &InternalData, query: &str) -> String {
-    let now = history::now();
-    let q = query.trim().to_lowercase();
-    let mut entries: Vec<&history::Entry> = data
-        .history
-        .iter()
-        .filter(|e| q.is_empty() || e.url.to_lowercase().contains(&q) || e.title.to_lowercase().contains(&q))
-        .collect();
-    entries.sort_by(|a, b| b.last.cmp(&a.last));
-    let mut body = format!(
-        r#"<h1>History</h1><form><input name="q" value="{}" placeholder="Search history" autofocus></form>"#,
-        html_escape(query)
-    );
-    let mut current_day = String::new();
-    for e in entries.iter().take(500) {
-        let day = day_label(e.last, now);
-        if day != current_day {
-            body.push_str(&format!(r#"<div class="day">{day}</div>"#));
-            current_day = day;
-        }
-        let site = crate::settings::site_of(&e.url).unwrap_or_default();
-        let title = if e.title.is_empty() { &e.url } else { &e.title };
-        body.push_str(&format!(
-            r#"<div class="row"><div class="grow"><div class="title"><a href="{u}">{t}</a></div><div class="url">{u} · {v} visit{s}</div></div><a class="btn" href="/?forget={site_q}" title="Remove every page from {site_h} from history">Forget site</a></div>"#,
-            u = html_escape(&e.url),
-            t = html_escape(title),
-            v = e.visits,
-            s = if e.visits == 1 { "" } else { "s" },
-            site_q = html_escape(&site),
-            site_h = html_escape(&site),
-        ));
-    }
-    if entries.is_empty() {
-        body.push_str(r#"<p class="empty">Nothing here.</p>"#);
-    }
+    let body = HISTORY_BODY
+        .replace("__ENTRIES__", &history_json(&data.history))
+        .replace("__QUERY__", &serde_json::to_string(query).unwrap_or_else(|_| "\"\"".into()).replace("</", r"<\/"));
     page("History", &data.theme, &body, None)
 }
 
-/// `http://hen.downloads/`: downloads of this session (refreshes while any is running).
+const HISTORY_BODY: &str = r#"
+<style>
+  .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .head h1 { margin: 0; flex: 1; }
+  .head input { flex: 0 1 300px; }
+  button.btn { background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
+  .entry { display: flex; align-items: center; gap: 12px; padding: 7px 10px; border-bottom: 1px solid var(--border-color); }
+  .entry:hover { background: var(--hover-bg); }
+  .entry .time { flex: none; width: 70px; white-space: nowrap; color: var(--subtext-color); font-size: 12px; }
+  .entry .info { flex: 1; min-width: 0; }
+  .entry a.title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; font-size: 14px; }
+  .entry a.title:hover { text-decoration: underline; }
+  .entry .url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--subtext-color); font-size: 12px; }
+  .entry .acts { display: flex; gap: 6px; flex: none; opacity: 0; transition: opacity 120ms; }
+  .entry:hover .acts, .entry:focus-within .acts { opacity: 1; }
+  .count { color: var(--subtext-color); font-size: 12px; margin-bottom: 4px; }
+</style>
+<div class="head">
+  <h1>History</h1>
+  <input id="q" placeholder="Search history" spellcheck="false" autofocus>
+  <button class="btn" id="clear">Clear history</button>
+</div>
+<div class="count" id="count"></div>
+<div id="list"></div>
+<script>
+  const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+  const $ = (id) => document.getElementById(id);
+  let entries = __ENTRIES__;
+  $("q").value = __QUERY__;
+
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  function dayLabel(secs) {
+    const d = new Date(secs * 1000);
+    const days = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86400000);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: days > 300 ? "numeric" : undefined });
+  }
+  const timeOf = (secs) => new Date(secs * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+  function button(label, title, onClick) {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = label;
+    b.title = title;
+    b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(); };
+    return b;
+  }
+
+  function render() {
+    const q = $("q").value.trim().toLowerCase();
+    const shown = entries.filter((e) => !q || e.url.toLowerCase().includes(q) || (e.title || "").toLowerCase().includes(q));
+    $("count").textContent = shown.length ? `${shown.length} page${shown.length === 1 ? "" : "s"}` : "";
+    const list = $("list");
+    list.innerHTML = "";
+    if (!shown.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = q ? "Nothing matches." : "No history yet.";
+      list.appendChild(p);
+      return;
+    }
+    let day = "";
+    for (const e of shown.slice(0, 1500)) {
+      const label = dayLabel(e.last);
+      if (label !== day) {
+        day = label;
+        const h = document.createElement("div");
+        h.className = "day";
+        h.textContent = label;
+        list.appendChild(h);
+      }
+      const row = document.createElement("div");
+      row.className = "entry";
+      const time = document.createElement("div");
+      time.className = "time";
+      time.textContent = timeOf(e.last);
+      const info = document.createElement("div");
+      info.className = "info";
+      const a = document.createElement("a");
+      a.className = "title";
+      a.href = e.url;
+      a.textContent = e.title || e.url;
+      a.title = e.title || e.url;
+      const url = document.createElement("div");
+      url.className = "url";
+      url.textContent = e.url + (e.visits > 1 ? `  ·  ${e.visits} visits` : "");
+      url.title = e.url;
+      info.append(a, url);
+      const acts = document.createElement("div");
+      acts.className = "acts";
+      acts.append(button("Remove", "Remove this page from history", () => {
+        entries = entries.filter((x) => x.url !== e.url);
+        render();
+        post({ cmd: "remove_history_entry", url: e.url });
+      }));
+      if (e.site) {
+        acts.append(button("Forget site", "Remove every page from " + e.site, () => {
+          if (!confirm("Remove every page from " + e.site + " from history?")) return;
+          post({ cmd: "forget_history_site", site: e.site });
+        }));
+      }
+      row.append(time, info, acts);
+      list.appendChild(row);
+    }
+  }
+
+  window.hbHistory = { render(list) { entries = list; render(); } };
+  $("q").addEventListener("input", render);
+  $("clear").onclick = () => { if (confirm("Clear all browsing history?")) post({ cmd: "clear_history" }); };
+  render();
+</script>
+"#;
+
+/// `http://hen.downloads/`: rendered in the page from data the browser pushes
+/// (`hbDownloads.render`), so it updates live without reloading; every action is a message.
 pub fn downloads_page(data: &InternalData) -> String {
-    let mut body = String::from(r#"<h1>Downloads</h1>"#);
-    let running = data.downloads.iter().any(|d| d.state == "in_progress");
-    if data.downloads.is_empty() {
-        body.push_str(r#"<p class="empty">No downloads yet in this session.</p>"#);
-    } else {
-        body.push_str(r#"<p><a class="btn" href="/?clear=1">Clear finished</a></p>"#);
-    }
-    for d in data.downloads.iter().rev() {
-        let name = std::path::Path::new(&d.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| d.url.clone());
-        let size = |b: u64| {
-            if b >= 1 << 30 {
-                format!("{:.2} GB", b as f64 / f64::from(1u32 << 30))
-            } else if b >= 1 << 20 {
-                format!("{:.1} MB", b as f64 / f64::from(1u32 << 20))
-            } else {
-                format!("{:.0} KB", b as f64 / 1024.0)
-            }
-        };
-        let (status, pct) = match d.state.as_str() {
-            "completed" => (format!("Done · {}", size(d.received)), 100.0),
-            "interrupted" => ("Failed".to_owned(), 0.0),
-            "cancelled" => ("Cancelled".to_owned(), 0.0),
-            "paused" => (format!("Paused · {}", size(d.received)), 0.0),
-            _ if d.total > 0 => (
-                format!("{} of {}", size(d.received), size(d.total)),
-                d.received as f64 * 100.0 / d.total as f64,
-            ),
-            _ => (format!("{} so far", size(d.received)), 0.0),
-        };
-        let actions = if d.state == "completed" {
-            format!(r#"<a class="btn" href="/?open={id}">Open</a> <a class="btn" href="/?show={id}">Show in folder</a>"#, id = d.id)
-        } else {
-            String::new()
-        };
-        let bar = if d.state == "in_progress" { format!(r#"<div class="bar"><div style="width:{pct:.0}%"></div></div>"#) } else { String::new() };
-        body.push_str(&format!(
-            r#"<div class="row"><div class="grow"><div class="title">{n}</div><div class="meta">{st} · <span class="url">{u}</span></div>{bar}</div>{actions}</div>"#,
-            n = html_escape(&name),
-            st = html_escape(&status),
-            u = html_escape(&d.url),
-        ));
-    }
-    page("Downloads", &data.theme, &body, running.then_some(1))
+    let initial = serde_json::json!({
+        "downloads": data.downloads.iter().rev().collect::<Vec<_>>(),
+        "open_when_done": [],
+    });
+    let body = DOWNLOADS_BODY.replace("__INITIAL__", &initial.to_string().replace("</", r"<\/"));
+    page("Downloads", &data.theme, &body, None)
 }
+
+const DOWNLOADS_BODY: &str = r#"
+<style>
+  .head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .head h1 { margin: 0; flex: 1; }
+  .head input { flex: 0 1 260px; }
+  .dl { display: flex; align-items: center; gap: 12px; padding: 10px; border-bottom: 1px solid var(--border-color); }
+  .dl:hover { background: var(--hover-bg); }
+  .dl .info { flex: 1; min-width: 0; }
+  .dl .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .dl.done .name { cursor: pointer; }
+  .dl.done .name:hover { text-decoration: underline; }
+  .dl .url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--subtext-color); font-size: 12px; margin-top: 2px; }
+  .dl .status { color: var(--subtext-color); font-size: 12px; margin-top: 2px; }
+  .dl.failed .status { color: #c0392b; }
+  .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex: none; max-width: 50%; }
+  button.btn { background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
+  button.btn.on { background: var(--hover-bg); }
+</style>
+<div class="head">
+  <h1>Downloads</h1>
+  <input id="filter" placeholder="Filter downloads" spellcheck="false">
+  <button class="btn" id="clear">Clear list</button>
+</div>
+<div id="list"></div>
+<script>
+  const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+  const $ = (id) => document.getElementById(id);
+  const size = (n) => n >= 1 << 30 ? (n / (1 << 30)).toFixed(2) + " GB" : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + " MB" : Math.round(n / 1024) + " KB";
+  const speed = (n) => n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + " MB/s" : n >= 1 << 10 ? Math.round(n / 1024) + " KB/s" : Math.round(n) + " B/s";
+  const fileName = (d) => (d.path || d.url || "download").split(/[\\/]/).pop();
+  const rates = new Map();
+  let state = __INITIAL__;
+
+  function rate(d) {
+    const now = performance.now(), r = rates.get(d.id);
+    if (!r) { rates.set(d.id, { bytes: d.received, t: now, bps: 0 }); return 0; }
+    const dt = (now - r.t) / 1000;
+    if (dt >= 0.5 && d.received >= r.bytes) {
+      const inst = (d.received - r.bytes) / dt;
+      r.bps = r.bps ? r.bps * 0.6 + inst * 0.4 : inst;
+      r.bytes = d.received; r.t = now;
+    }
+    return now - r.t < 2500 ? r.bps : 0;
+  }
+
+  function status(d, openLater) {
+    const progress = d.total ? size(d.received) + " of " + size(d.total) : size(d.received);
+    switch (d.state) {
+      case "completed": return "Done • " + size(d.received || d.total);
+      case "cancelled": return "Cancelled";
+      case "interrupted": return d.can_resume ? "Failed • can resume" : "Failed";
+      case "paused": return "Paused • " + progress + (openLater ? " • opens when done" : "");
+      default: return progress + " • " + speed(rate(d)) + (openLater ? " • opens when done" : "");
+    }
+  }
+
+  function button(label, msg, extra) {
+    const b = document.createElement("button");
+    b.className = "btn" + (extra ? " " + extra : "");
+    b.textContent = label;
+    b.onclick = (e) => { e.stopPropagation(); post(msg); };
+    return b;
+  }
+
+  function render() {
+    const q = $("filter").value.trim().toLowerCase();
+    const list = $("list");
+    list.innerHTML = "";
+    const openLater = new Set(state.open_when_done || []);
+    const items = (state.downloads || []).filter((d) => !q || fileName(d).toLowerCase().includes(q) || (d.url || "").toLowerCase().includes(q));
+    if (!items.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = q ? "Nothing matches." : "No downloads in this session yet.";
+      list.appendChild(p);
+      return;
+    }
+    for (const d of items) {
+      const running = d.state === "in_progress", paused = d.state === "paused", done = d.state === "completed";
+      const failed = d.state === "cancelled" || d.state === "interrupted";
+      const row = document.createElement("div");
+      row.className = "dl" + (done ? " done" : "") + (failed ? " failed" : "");
+      const info = document.createElement("div");
+      info.className = "info";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = fileName(d);
+      name.title = d.path || "";
+      if (done) name.onclick = () => post({ cmd: "open_download", id: d.id });
+      const url = document.createElement("div");
+      url.className = "url";
+      url.textContent = d.url;
+      url.title = d.url;
+      const st = document.createElement("div");
+      st.className = "status";
+      st.textContent = status(d, openLater.has(d.id));
+      info.append(name, url, st);
+      if (running || paused) {
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const fill = document.createElement("div");
+        fill.style.width = (d.total ? Math.min(100, (d.received / d.total) * 100) : 30) + "%";
+        bar.appendChild(fill);
+        info.appendChild(bar);
+      }
+      const acts = document.createElement("div");
+      acts.className = "acts";
+      if (done) {
+        acts.append(button("Open", { cmd: "open_download", id: d.id }), button("Show in folder", { cmd: "show_download", id: d.id }));
+      }
+      if (running || paused) {
+        acts.append(
+          button(running ? "Pause" : "Resume", { cmd: "pause_download", id: d.id }),
+          button("Open when done", { cmd: "toggle_open_when_done", id: d.id }, openLater.has(d.id) ? "on" : ""),
+          button("Cancel", { cmd: "cancel_download", id: d.id }),
+        );
+      }
+      if (failed) acts.append(button(d.state === "interrupted" && d.can_resume ? "Resume" : "Re-download", { cmd: "retry_download", id: d.id }));
+      if (done) acts.append(button("Re-download", { cmd: "retry_download", id: d.id }));
+      acts.append(button("Copy URL", { cmd: "copy_download_url", id: d.id }));
+      if (!running && !paused) acts.append(button("Remove", { cmd: "remove_download", id: d.id }));
+      row.append(info, acts);
+      list.appendChild(row);
+    }
+  }
+
+  window.hbDownloads = { render(s) { state = s; render(); } };
+  $("filter").addEventListener("input", render);
+  $("clear").onclick = () => post({ cmd: "clear_downloads" });
+  render();
+  // Keeps the speed readout honest between updates.
+  setInterval(() => { if ((state.downloads || []).some((d) => d.state === "in_progress")) render(); }, 1000);
+</script>
+"#;
 
 /// `http://hen.bookmarks/`: full bookmarks & Read Later manager with search, folder filter,
 /// and HTML import.
@@ -577,21 +769,23 @@ mod tests {
     }
 
     #[test]
-    fn history_page_groups_and_filters() {
+    fn history_page_embeds_entries() {
         let now = history::now();
         let data = InternalData {
             history: vec![
-                history::Entry { url: "https://doc.rust-lang.org/".into(), title: "Rust <docs>".into(), visits: 3, last: now },
                 history::Entry { url: "https://github.com/".into(), title: "GitHub".into(), visits: 1, last: now - 86_400 },
+                history::Entry { url: "https://doc.rust-lang.org/".into(), title: "Rust </script> docs".into(), visits: 3, last: now },
             ],
             ..Default::default()
         };
-        let html = history_page(&data, "");
-        assert!(html.contains("Today") && html.contains("Yesterday"));
-        assert!(html.contains("Rust &lt;docs&gt;"));
-        assert!(html.contains("forget=github.com"));
+        let json = history_json(&data.history);
+        // Newest first, each with its site (for "forget site").
+        assert!(json.find("doc.rust-lang.org").unwrap() < json.find("github.com").unwrap());
+        assert!(json.contains(r#""site":"github.com""#));
+        // A "</script>" in a title can't end the embedded data early.
         let html = history_page(&data, "rust");
-        assert!(!html.contains("GitHub"));
+        assert!(!html.contains("Rust </script>") && html.contains("hbHistory"));
+        assert!(html.contains(r#"$("q").value = "rust";"#));
     }
 
     #[test]
@@ -600,6 +794,33 @@ mod tests {
         assert!(downloads_page(&data).contains("No downloads"));
         data.downloads.push(Download { id: 7, url: "https://x/a.zip".into(), path: r"C:\d\a.zip".into(), received: 512 << 10, total: 1 << 20, state: "in_progress".into(), can_resume: false });
         let html = downloads_page(&data);
-        assert!(html.contains("a.zip") && html.contains("width:50%") && html.contains("http-equiv=\"refresh\""));
+        // Rendered by the page from the embedded data; it never reloads itself.
+        assert!(html.contains(r#""url":"https://x/a.zip""#) && html.contains("hbDownloads"));
+        assert!(!html.contains("http-equiv=\"refresh\""));
+        // A "</script>" in a URL can't end the embedded data early.
+        data.downloads[0].url = "https://x/</script>.zip".into();
+        assert!(!downloads_page(&data).contains("x/</script>"));
+    }
+
+    /// Writes sample History and Downloads pages to `$HEN_PREVIEW_DIR` for a visual check.
+    #[test]
+    #[ignore]
+    fn preview_pages() {
+        let Some(dir) = std::env::var_os("HEN_PREVIEW_DIR") else { return };
+        let now = history::now();
+        let mut data = InternalData::default();
+        data.history = vec![
+            history::Entry { url: "https://doc.rust-lang.org/std/collections/struct.HashMap.html".into(), title: "HashMap in std::collections - Rust".into(), visits: 4, last: now - 600 },
+            history::Entry { url: "https://github.com/despale-code/chickenwm".into(), title: "despale-code/chickenwm".into(), visits: 2, last: now - 3_600 },
+            history::Entry { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ".into(), title: "A video with a rather long title that goes on and on and on".into(), visits: 1, last: now - 90_000 },
+        ];
+        data.downloads = vec![
+            Download { id: 1, url: "https://example.com/files/a-very-long-file-name-for-testing-the-overflow-behaviour-of-the-list.zip".into(), path: r"C:\Downloads\a-very-long-file-name-for-testing-the-overflow-behaviour-of-the-list.zip".into(), received: 3 << 20, total: 3 << 20, state: "completed".into(), can_resume: false },
+            Download { id: 2, url: "https://example.com/big.iso".into(), path: r"C:\Downloads\big.iso".into(), received: 400 << 20, total: 1 << 30, state: "in_progress".into(), can_resume: true },
+            Download { id: 3, url: "https://example.com/x.exe".into(), path: r"C:\Downloads\x.exe".into(), received: 1 << 20, total: 5 << 20, state: "cancelled".into(), can_resume: false },
+        ];
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::write(dir.join("history.html"), history_page(&data, "")).unwrap();
+        std::fs::write(dir.join("downloads.html"), downloads_page(&data)).unwrap();
     }
 }

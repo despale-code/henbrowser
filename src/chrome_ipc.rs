@@ -18,7 +18,7 @@ use crate::{
     display_url, downloads, ext_install, extensions, history, install_shortcuts, internal, internal_mode_init,
     mode_apply_js, process_memory, profile_builder, resolve_input, settings, show_settings_page,
     theme_apply_js, theme_init_script, Browser, Shortcut, UserEvent, HOME, POPUP_H, POPUP_W,
-    SHELF_H, SIDEBAR_COLLAPSED_W, SIDEBAR_STRIP_W, SIDEBAR_W, START_URL, SUGGEST_MAX, SUGGEST_PAD,
+    SHELF_H, SIDEBAR_COLLAPSED_W, SIDEBAR_MAX_W, SIDEBAR_MIN_W, SIDEBAR_STRIP_W, START_URL, SUGGEST_MAX, SUGGEST_PAD,
     SUGGEST_ROW_H, TOOLBAR_BOOKMARK_H, WIN_BORDER,
 };
 
@@ -88,6 +88,18 @@ pub(crate) enum ToolbarCmd {
     RestartBrowser,
     Suggest { text: String, x: f64, w: f64, #[serde(default)] y: f64 },
     NewPrivateTab,
+    /// Dragging the sidebar's right edge; `done` on release (then it is saved).
+    SidebarWidth { w: f64, #[serde(default)] done: bool },
+    RetryDownload { id: u64 },
+    /// A click on a running download's card: open the file as soon as it finishes (again: don't).
+    ToggleOpenWhenDone { id: u64 },
+    CopyDownloadUrl { id: u64 },
+    RemoveDownload { id: u64 },
+    /// Clears finished downloads from the list (running and paused ones stay).
+    ClearDownloads,
+    RemoveHistoryEntry { url: String },
+    ForgetHistorySite { site: String },
+    ClearHistory,
     SuggestSel { sel: i32 },
     SuggestHide,
     ToggleBookmark,
@@ -119,8 +131,13 @@ impl Browser {
             + match a.sidebar_collapsed {
                 _ if a.sidebar_autohide => SIDEBAR_STRIP_W,
                 true => SIDEBAR_COLLAPSED_W,
-                false => SIDEBAR_W,
+                false => self.sidebar_width(),
             }
+    }
+
+    /// The expanded sidebar's width (resizable by dragging its right edge).
+    pub(crate) fn sidebar_width(&self) -> f64 {
+        self.settings.appearance.sidebar_width.clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W)
     }
 
     /// Where the page starts from the top: the window border, and the bookmarks bar when shown.
@@ -194,19 +211,33 @@ impl Browser {
         }
     }
 
+    /// Refreshes the start page data and any open `hen:history` page (which renders in place).
+    pub(crate) fn push_history(&self) {
+        self.refresh_start();
+        let entries = internal::history_json(self.history.entries());
+        for tab in self.tabs.iter().filter(|t| t.url.starts_with("http://hen.history")) {
+            let _ = tab.webview.evaluate_script(&format!("window.hbHistory && hbHistory.render({entries})"));
+        }
+    }
+
+    /// Pushes the downloads to the shelf and to any open `hen:downloads` page (both render them
+    /// in place; nothing reloads).
     pub(crate) fn sync_shelf(&self) {
+        let all: Vec<internal::Download> =
+            self.start.lock().map(|d| d.downloads.iter().rev().cloned().collect()).unwrap_or_default();
+        let open_when_done: Vec<u64> = self.open_when_done.iter().copied().collect();
+        let page_state = json!({ "downloads": all, "open_when_done": open_when_done });
+        for tab in self.tabs.iter().filter(|t| t.url.starts_with("http://hen.downloads")) {
+            let _ = tab.webview.evaluate_script(&format!("window.hbDownloads && hbDownloads.render({page_state})"));
+        }
         let Some(shelf) = &self.shelf else { return };
-        let downloads: Vec<internal::Download> = self
-            .start
-            .lock()
-            .map(|d| d.downloads.iter().rev().take(12).cloned().collect())
-            .unwrap_or_default();
+        let downloads: Vec<&internal::Download> = all.iter().take(12).collect();
         let notice = self
             .notice
             .as_ref()
             .filter(|(_, at)| at.elapsed() < Duration::from_secs(10))
             .map(|(text, _)| text.as_str());
-        let state = json!({ "downloads": downloads, "notice": notice });
+        let state = json!({ "downloads": downloads, "notice": notice, "open_when_done": open_when_done });
         let _ = shelf.evaluate_script(&format!("window.hbShelf && hbShelf.render({state})"));
     }
 
@@ -233,6 +264,35 @@ impl Browser {
         });
     }
 
+    /// Retries a cancelled or failed download: resumes it when WebView2 can, otherwise fetches
+    /// the address again (as a new download; the old entry is dropped).
+    pub(crate) fn retry_download(&mut self, id: u64) {
+        let Some(d) = self
+            .start
+            .lock()
+            .ok()
+            .and_then(|data| data.downloads.iter().find(|x| x.id == id).cloned())
+        else {
+            return;
+        };
+        if d.state == "interrupted" && d.can_resume {
+            downloads::toggle_pause(id);
+            return;
+        }
+        if !(d.url.starts_with("https://") || d.url.starts_with("http://")) {
+            self.set_notice("This download can't be retried: start it again from its page".into());
+            return;
+        }
+        if let Ok(mut data) = self.start.lock() {
+            data.downloads.retain(|x| x.id != id);
+        }
+        // A file served as a download leaves the tab where it is.
+        if let Some(tab) = self.tabs.get(self.active) {
+            let _ = tab.webview.load_url(&d.url);
+        }
+        self.sync_shelf();
+    }
+
     /// The ▾ menu on a download card, as a native popup at the pointer.
     pub(crate) fn download_menu(&mut self, id: u64) {
         let Some(d) = self
@@ -248,6 +308,7 @@ impl Browser {
         const COPY: usize = 3;
         const INSTALL: usize = 4;
         const CANCEL: usize = 5;
+        const RETRY: usize = 6;
         let picked = unsafe {
             use windows::core::HSTRING;
             let Ok(menu) = CreatePopupMenu() else { return };
@@ -259,11 +320,16 @@ impl Browser {
                 add(PAUSE, "Pause download");
             } else if resumable {
                 add(PAUSE, "Resume download");
+            } else if matches!(d.state.as_str(), "cancelled" | "interrupted") {
+                add(RETRY, "Retry download");
             }
             if d.state == "completed" && d.path.to_ascii_lowercase().ends_with(".crx") {
                 add(INSTALL, "Install extension");
             }
-            add(BROWSE, "Browse in Explorer");
+            // A cancelled or failed download has no file to show.
+            if !matches!(d.state.as_str(), "cancelled" | "interrupted") && std::path::Path::new(&d.path).exists() {
+                add(BROWSE, "Browse in Explorer");
+            }
             add(COPY, "Copy download URL");
             if d.state == "in_progress" || d.state == "paused" {
                 let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
@@ -290,6 +356,7 @@ impl Browser {
             COPY => downloads::set_clipboard_text(&d.url),
             INSTALL => self.install_extension(d.path),
             CANCEL => downloads::cancel(id),
+            RETRY => self.retry_download(id),
             _ => {}
         }
     }
@@ -306,7 +373,7 @@ impl Browser {
         let (_, h) = self.logical_size();
         Rect {
             position: LogicalPosition::new(WIN_BORDER, WIN_BORDER).into(),
-            size: LogicalSize::new(SIDEBAR_W, (h - 2.0 * WIN_BORDER).max(1.0)).into(),
+            size: LogicalSize::new(self.sidebar_width(), (h - 2.0 * WIN_BORDER).max(1.0)).into(),
         }
     }
 
@@ -472,7 +539,7 @@ impl Browser {
     pub(crate) fn menu_rect(&self) -> Rect {
         let (w, h) = self.logical_size();
         let width = 260.0f64.min(w - 20.0);
-        let height = 600.0f64.min((h - 20.0).max(100.0));
+        let height = 700.0f64.min((h - 20.0).max(100.0));
         Rect {
             position: LogicalPosition::new(self.sidebar_w() + 6.0, (h - WIN_BORDER - height - 6.0).max(0.0)).into(),
             size: LogicalSize::new(width, height).into(),
@@ -558,6 +625,7 @@ impl Browser {
                 "collapsed": self.settings.appearance.sidebar_collapsed,
                 "bookmarks_bar": self.settings.appearance.show_bookmarks_bar,
                 "sidebar": self.sidebar_w(),
+                "sidebar_width": self.sidebar_width(),
                 "top": self.top_chrome_h(),
                 "border": WIN_BORDER,
                 "animations": self.settings.appearance.animations,
@@ -693,9 +761,16 @@ impl Browser {
         let bounds = self.menu_rect();
         let p_ipc = self.proxy.clone();
         let ram = serde_json::to_string(&self.ram_text()).unwrap_or_default();
+        // What the menu lists besides its fixed items: extensions (their buttons live here now) and
+        // toggles that show their state.
+        let menu_state = json!({
+            "extensions": self.extensions.iter().map(|e| json!({ "id": e.id, "name": e.name, "icon": e.icon })).collect::<Vec<_>>(),
+            "autohide": self.settings.appearance.sidebar_autohide,
+        });
         let built = profile_builder(&mut self.web_context, &self.settings.memory)
             .with_html(include_str!("menu.html"))
             .with_initialization_script(format!("window.__ramText = {ram};"))
+            .with_initialization_script(format!("window.__henMenu = {menu_state};"))
             .with_initialization_script(theme_init_script(&self.user_css))
             .with_initialization_script(internal_mode_init(&self.mode_css))
             .with_bounds(bounds)
@@ -852,6 +927,52 @@ impl Browser {
                     }
                     ToolbarCmd::Suggest { text, x, w, y } => self.show_suggestions(&text, x, w, y),
                     ToolbarCmd::NewPrivateTab => self.open_private_tab(),
+                    ToolbarCmd::SidebarWidth { w, done } => {
+                        self.settings.appearance.sidebar_width = w.clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+                        self.layout();
+                        if done {
+                            self.save_settings();
+                            self.sync_toolbar();
+                        }
+                    }
+                    ToolbarCmd::RetryDownload { id } => self.retry_download(id),
+                    ToolbarCmd::ToggleOpenWhenDone { id } => {
+                        if !self.open_when_done.remove(&id) {
+                            self.open_when_done.insert(id);
+                        }
+                        self.sync_shelf();
+                    }
+                    ToolbarCmd::CopyDownloadUrl { id } => {
+                        let url = self.start.lock().ok().and_then(|d| d.downloads.iter().find(|x| x.id == id).map(|x| x.url.clone()));
+                        if let Some(url) = url {
+                            downloads::set_clipboard_text(&url);
+                        }
+                    }
+                    ToolbarCmd::RemoveDownload { id } => {
+                        if let Ok(mut data) = self.start.lock() {
+                            data.downloads.retain(|x| x.id != id || matches!(x.state.as_str(), "in_progress" | "paused"));
+                        }
+                        self.open_when_done.remove(&id);
+                        self.sync_shelf();
+                    }
+                    ToolbarCmd::RemoveHistoryEntry { url } => {
+                        self.history.remove(&url);
+                        self.push_history();
+                    }
+                    ToolbarCmd::ForgetHistorySite { site } => {
+                        self.history.forget_site(&site);
+                        self.push_history();
+                    }
+                    ToolbarCmd::ClearHistory => {
+                        self.history.clear();
+                        self.push_history();
+                    }
+                    ToolbarCmd::ClearDownloads => {
+                        if let Ok(mut data) = self.start.lock() {
+                            data.downloads.retain(|x| matches!(x.state.as_str(), "in_progress" | "paused"));
+                        }
+                        self.sync_shelf();
+                    }
                     ToolbarCmd::SuggestSel { sel } => {
                         if let Some(s) = self.suggest.as_ref().filter(|_| self.suggest_visible) {
                             let _ = s.evaluate_script(&format!("sg.sel({sel})"));
@@ -1393,8 +1514,17 @@ impl Browser {
                 self.sync_toolbar();
                 self.push_settings_state();
             }
+            UserEvent::DownloadPoll => {
+                for d in downloads::poll() {
+                    self.handle(UserEvent::Download(d));
+                }
+            }
             UserEvent::Download(d) => {
                 let mut is_new = false;
+                // Flagged to open when done (a click on its card while it was running).
+                if d.state == "completed" && self.open_when_done.remove(&d.id) {
+                    downloads::open_file(&d.path);
+                }
                 if let Ok(mut data) = self.start.lock() {
                     match data.downloads.iter_mut().find(|x| x.id == d.id) {
                         Some(x) => *x = d,

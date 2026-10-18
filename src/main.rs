@@ -54,7 +54,8 @@ use tabs::Tab;
 
 pub(crate) const TOOLBAR_BOOKMARK_H: f64 = 28.0; // optional bookmarks bar
 pub(crate) const SHELF_H: f64 = 46.0; // download bar along the bottom
-pub(crate) const SIDEBAR_W: f64 = 240.0;
+pub(crate) const SIDEBAR_MIN_W: f64 = 180.0;
+pub(crate) const SIDEBAR_MAX_W: f64 = 520.0;
 pub(crate) const SIDEBAR_COLLAPSED_W: f64 = 56.0;
 pub(crate) const SIDEBAR_STRIP_W: f64 = 6.0;
 pub(crate) const POPUP_W: f64 = 380.0;
@@ -106,6 +107,8 @@ pub(crate) enum UserEvent {
     ExtensionInstalled(Result<String, String>),
     /// Back/Forward availability may have changed.
     NavState,
+    /// Re-read live downloads (a backstop for missed WebView2 download events).
+    DownloadPoll,
     PopupLostFocus,
     CssReload(String),
     ThemeConfigChanged,
@@ -185,6 +188,8 @@ pub(crate) struct Browser {
     /// The download bar along the bottom, built on the first download.
     pub(crate) shelf: Option<WebView>,
     pub(crate) shelf_visible: bool,
+    /// Downloads to open as soon as they finish.
+    pub(crate) open_when_done: std::collections::HashSet<u64>,
     /// A short status line on the download bar (extension installs), with when it was set.
     pub(crate) notice: Option<(String, Instant)>,
 }
@@ -1558,6 +1563,7 @@ fn main() -> anyhow::Result<()> {
         ambient_busy: Rc::new(Cell::new(None)),
         shelf: None,
         shelf_visible: false,
+        open_when_done: Default::default(),
         notice: None,
     };
     browser.build_suggest();
@@ -1580,6 +1586,15 @@ fn main() -> anyhow::Result<()> {
         let url = resolve_input(arg, &browser.settings.search_engine);
         browser.open_tab(&url);
     }
+
+    // Download state backstop: cheap when nothing is downloading.
+    let proxy_dl = proxy.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(1));
+        if proxy_dl.send_event(UserEvent::DownloadPoll).is_err() {
+            break;
+        }
+    });
 
     let proxy_mem = proxy.clone();
     std::thread::spawn(move || loop {

@@ -98,6 +98,18 @@ impl History {
         &self.entries
     }
 
+    /// Removes one page from the history.
+    pub fn remove(&mut self, url: &str) -> bool {
+        let before = self.entries.len();
+        self.entries.retain(|e| e.url != url);
+        let removed = self.entries.len() != before;
+        if removed {
+            self.dirty = true;
+            self.save_if_dirty();
+        }
+        removed
+    }
+
     /// Removes every page of `site` (see `settings::site_of`) from the history.
     pub fn forget_site(&mut self, site: &str) -> usize {
         let before = self.entries.len();

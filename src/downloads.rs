@@ -27,19 +27,42 @@ pub(crate) fn shell_execute(verb: &str, file: &str, params: Option<&str>) {
     }
 }
 
+/// Reads a download's current progress and state.
+type Snapshot = std::rc::Rc<dyn Fn(&ICoreWebView2DownloadOperation) -> internal::Download>;
+
 thread_local! {
-    /// Live operations by download id, for cancelling from the shelf. Download events arrive on
-    /// the UI thread, which is the only thread that touches this.
-    static OPS: std::cell::RefCell<std::collections::HashMap<u64, ICoreWebView2DownloadOperation>> =
+    /// Live downloads by id: the operation and how to read it. Download events arrive on the UI
+    /// thread, which is the only thread that touches this.
+    static OPS: std::cell::RefCell<std::collections::HashMap<u64, (ICoreWebView2DownloadOperation, Snapshot)>> =
         Default::default();
 }
 
+/// Runs `f` on download `id`'s operation. The table is released first: Pause / Resume / Cancel
+/// raise StateChanged synchronously, and its handler updates the table.
 fn with_op(id: u64, f: impl FnOnce(&ICoreWebView2DownloadOperation)) {
-    OPS.with_borrow(|ops| {
-        if let Some(op) = ops.get(&id) {
-            f(op);
+    let op = OPS.with_borrow(|ops| ops.get(&id).map(|(op, _)| op.clone()));
+    if let Some(op) = op {
+        f(&op);
+    }
+}
+
+/// A download that will not change any more (no need to keep watching it).
+fn is_final(d: &internal::Download) -> bool {
+    d.state == "completed" || d.state == "cancelled" || (d.state == "interrupted" && !d.can_resume)
+}
+
+/// Current snapshots of every live download, forgetting the finished ones. Polled as a backstop:
+/// a missed StateChanged event would otherwise leave a finished download "in progress" forever.
+pub(crate) fn poll() -> Vec<internal::Download> {
+    let live: Vec<(ICoreWebView2DownloadOperation, Snapshot)> =
+        OPS.with_borrow(|ops| ops.values().map(|(op, s)| (op.clone(), s.clone())).collect());
+    let snaps: Vec<internal::Download> = live.iter().map(|(op, snapshot)| snapshot(op)).collect();
+    OPS.with_borrow_mut(|ops| {
+        for d in snaps.iter().filter(|d| is_final(d)) {
+            ops.remove(&d.id);
         }
     });
+    snaps
 }
 
 pub(crate) fn cancel(id: u64) {
@@ -113,7 +136,6 @@ pub(crate) fn install_downloads(
                 let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
                 // The shelf shows it instead of the default flyout.
                 let _ = args.SetHandled(true);
-                OPS.with_borrow_mut(|ops| ops.insert(id, op.clone()));
                 let url = {
                     let mut p = windows::core::PWSTR::null();
                     op.Uri(&mut p)?;
@@ -125,7 +147,7 @@ pub(crate) fn install_downloads(
                     webview2_com::take_pwstr(p)
                 };
                 // Snapshot of the operation's progress as a `Download`.
-                let snapshot = {
+                let snapshot: Snapshot = std::rc::Rc::new({
                     let (url, path) = (url.clone(), path.clone());
                     move |op: &ICoreWebView2DownloadOperation| -> internal::Download {
                         let (mut received, mut total) = (0i64, 0i64);
@@ -165,7 +187,8 @@ pub(crate) fn install_downloads(
                             can_resume: can_resume.as_bool(),
                         }
                     }
-                };
+                });
+                OPS.with_borrow_mut(|ops| ops.insert(id, (op.clone(), snapshot.clone())));
                 let _ = proxy.send_event(UserEvent::Download(snapshot(&op)));
                 let mut t = 0i64;
                 let (p1, s1) = (proxy.clone(), snapshot.clone());
@@ -183,7 +206,7 @@ pub(crate) fn install_downloads(
                     &StateChangedEventHandler::create(Box::new(move |op, _| {
                         if let Some(op) = op {
                             let d = s2(&op);
-                            if d.state == "completed" || d.state == "cancelled" || (d.state == "interrupted" && !d.can_resume) {
+                            if is_final(&d) {
                                 OPS.with_borrow_mut(|ops| ops.remove(&d.id));
                             }
                             let _ = p2.send_event(UserEvent::Download(d));

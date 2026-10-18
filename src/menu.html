@@ -32,6 +32,8 @@
   .menu-container {
     padding: 6px;
     height: 100%;
+    overflow-y: auto;
+    scrollbar-width: thin;
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -39,7 +41,7 @@
     border-radius: 8px;
     box-shadow: 0 4px 16px var(--shadow-color);
     background: var(--surface-color);
-    transform-origin: top right;
+    transform-origin: bottom left;
     animation: menu-in 240ms cubic-bezier(0.05, 0.9, 0.1, 1.05) both;
   }
   @keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
@@ -92,6 +94,7 @@
     font-size: 12px;
     flex: none;
   }
+  .group-label { padding: 6px 10px 2px; font-size: 11px; color: var(--subtext-color); text-transform: uppercase; letter-spacing: 0.06em; flex: none; }
   .sep {
     height: 1px;
     background: var(--border-color);
@@ -152,6 +155,11 @@
     <span class="label">New tab</span>
     <span class="shortcut">Ctrl+T</span>
   </div>
+  <div class="item" data-action="new_private_tab">
+    <span class="icon">&#x25d4;</span>
+    <span class="label">New private tab</span>
+    <span class="shortcut">Ctrl+Shift+N</span>
+  </div>
   <div class="item" data-action="new_window">
     <span class="icon">&#x25a2;</span>
     <span class="label">New window</span>
@@ -207,16 +215,17 @@
     <span class="icon">&#x25d0;</span>
     <span class="label">Light / dark mode</span>
   </div>
-  <div class="item" data-action="new_private_tab">
-    <span class="icon">&#x25d4;</span>
-    <span class="label">New private tab</span>
-    <span class="shortcut">Ctrl+Shift+N</span>
+  <div class="item" data-action="toggle_sidebar_autohide" id="autohide-item">
+    <span class="icon">&#x21e4;</span>
+    <span class="label">Auto-hide sidebar</span>
+    <span class="shortcut" id="autohide-state"></span>
   </div>
   <div class="item" data-action="devtools">
     <span class="icon">&#x2692;</span>
     <span class="label">Developer tools</span>
     <span class="shortcut">F12</span>
   </div>
+  <div id="ext-section"></div>
   <div class="sep"></div>
   <div class="item highlight" data-action="open_settings">
     <span class="icon">&#x2699;</span>
@@ -232,8 +241,36 @@
 </div>
 
 <script>
-  document.querySelectorAll('.menu-container > .item').forEach((el, i) => el.style.setProperty('--i', i));
   const post = (m) => window.ipc.postMessage(JSON.stringify(m));
+
+  // Extensions (their toolbar buttons moved in here) and the auto-hide state, from the browser.
+  const menuState = window.__henMenu || {};
+  document.getElementById("autohide-state").textContent = menuState.autohide ? "On" : "Off";
+  const extSection = document.getElementById("ext-section");
+  if ((menuState.extensions || []).length) {
+    extSection.innerHTML = '<div class="sep"></div><div class="group-label">Extensions</div>';
+    for (const ext of menuState.extensions) {
+      const item = document.createElement("div");
+      item.className = "item";
+      const icon = document.createElement("span");
+      icon.className = "icon";
+      if (ext.icon) {
+        const img = document.createElement("img");
+        img.src = ext.icon;
+        img.style.cssText = "width:16px;height:16px;border-radius:3px";
+        icon.appendChild(img);
+      } else {
+        icon.textContent = "⧉";
+      }
+      const label = document.createElement("span");
+      label.className = "label";
+      label.textContent = ext.name;
+      item.append(icon, label);
+      item.onclick = () => post({ cmd: "ext_popup", id: ext.id });
+      extSection.appendChild(item);
+    }
+  }
+  document.querySelectorAll('.menu-container > .item, #ext-section > .item').forEach((el, i) => el.style.setProperty('--i', i));
 
   document.querySelectorAll(".item[data-action]").forEach(el => {
     el.onclick = () => {

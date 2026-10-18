@@ -856,6 +856,68 @@
   body.flyout #win-border { display: none; }
   body.no-anim #win-border { animation: none; }
   @keyframes border-turn { to { --border-angle: 360deg; } }
+
+  /* Readable tabs: full text colour (titles of inactive tabs only a touch softer), and a sidebar
+     solid enough that the ambient glow behind it doesn't wash them out. */
+  #side .tab { color: var(--fg-color); }
+  #side .tab:not(.active) .title { opacity: 0.88; }
+  #side .tab.private { color: var(--fg-color); }
+  #side .tab.private .title { opacity: 0.72; }
+  body.fx #side { background: color-mix(in srgb, var(--sidebar-bg) 82%, transparent); }
+
+  /* Collapse / expand: the chevron turns, not the whole button. */
+  body.vertical.collapsed #sidebar-toggle, #sidebar-toggle { transform: none; }
+  #sidebar-toggle .chev { transition: transform 280ms var(--anim-bezier); transform-origin: 11.25px 8px; }
+  body.collapsed #sidebar-toggle .chev { transform: scaleX(-1); }
+  body.collapsed #menu-btn { display: none; }
+  #menu-btn.open { background: var(--press-bg); }
+
+  /* New tab: normal or private. */
+  #newtab-pop {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 44px;
+    z-index: 8;
+    display: none;
+    flex-direction: column;
+    padding: 4px;
+    background: var(--surface-color, var(--bg-color));
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: 0 6px 18px var(--shadow-color);
+  }
+  #newtab-pop.open { display: flex; animation: pop-in 160ms var(--anim-bezier); }
+  #newtab-pop button {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    white-space: nowrap;
+    gap: 10px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: calc(var(--border-radius) - 2px);
+    color: var(--fg-color);
+    text-align: left;
+  }
+  #newtab-pop button + button { border-top: 1px solid var(--border-color); border-radius: 0; }
+  #newtab-pop button:hover { background: var(--hover-bg); }
+  #newtab-pop button span { color: var(--subtext-color); font-size: 12px; }
+
+  /* Resize edge. */
+  #side-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -3px;
+    width: 7px;
+    z-index: 7;
+    cursor: ew-resize;
+  }
+  #side-resize:hover, body.resizing #side-resize { background: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+  body.collapsed #side-resize, body.autohide #side-resize, body.flyout #side-resize { display: none; }
+  body.resizing, body.resizing * { cursor: ew-resize !important; user-select: none; }
+  body.resizing #side { transition: none; }
 </style>
 <!-- Injected user stylesheet from ~/.config/chickenwm/browser.css -->
 <style id="user-theme"></style>
@@ -889,24 +951,31 @@
       <div id="progress"></div>
     </div>
     <div id="tabs"><div id="indicator"></div></div>
+    <div id="newtab-pop" role="menu">
+      <button data-kind="normal">New tab<span>Ctrl+T</span></button>
+      <button data-kind="private">New private tab<span>Ctrl+Shift+N</span></button>
+    </div>
     <div id="side-bottom">
-      <button id="sidebar-toggle" title="Collapse / expand tabs">&#x00ab;</button>
-      <button id="pin" title="Keep the tab sidebar open (turn off auto-hide)">&#x1f4cc;</button>
-      <button class="btn" id="newtab" title="New tab (Ctrl+T)">&#x2b;</button>
-      <button class="btn" id="private-tab" title="New private tab (Ctrl+Shift+N)">
-        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><path d="M1 2.5C1 1.6 1.8 1 2.7 1.2L9 2.6l6.3-1.4C16.2 1 17 1.6 17 2.5V5c0 3.3-2.2 6-5 6-1.5 0-2.4-1-3-2-.6 1-1.5 2-3 2-2.8 0-5-2.7-5-6zm4 3.2a1.6 1.6 0 1 0 0 .1zm8 0a1.6 1.6 0 1 0 0 .1z"/></svg>
+      <button id="sidebar-toggle" title="Collapse the sidebar">
+        <!-- A window with its left panel; the chevron points the way the panel will go. -->
+        <svg width="18" height="16" viewBox="0 0 18 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+          <rect x="1" y="1.5" width="16" height="13" rx="2.5"/>
+          <path d="M6.5 1.5v13"/>
+          <path class="chev" d="M12.5 5.5L10 8l2.5 2.5"/>
+        </svg>
       </button>
-      <div id="exts"></div>
-      <button class="btn" id="menu-btn" title="Customize and control Hen Browser">
+      <button id="pin" title="Keep the sidebar open (turn off auto-hide)">&#x1f4cc;</button>
+      <button class="btn" id="newtab" title="New tab (Shift+click: new tab, Shift+right-click: new private tab)">&#x2b;</button>
+      <div class="spacer"></div>
+      <button class="btn" id="menu-btn" title="Menu: private tab, extensions, history, downloads, settings and more">
         <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor">
           <rect y="0" width="16" height="2" rx="1"/>
           <rect y="5" width="16" height="2" rx="1"/>
           <rect y="10" width="16" height="2" rx="1"/>
         </svg>
       </button>
-      <div class="spacer"></div>
-      <button id="close" title="Close window">&#x2715;</button>
     </div>
+    <div id="side-resize" title="Drag to resize the sidebar"></div>
   </div>
 
   <div id="bmbar"></div>
@@ -931,13 +1000,65 @@
   };
   const letterOf = (t) => ((t.title || pretty(t.url) || "?").trim()[0] || "?").toUpperCase();
 
-  $("close").onclick = () => post({ cmd: "close_window" });
-  $("newtab").onclick = () => post({ cmd: "new_tab" });
-  $("menu-btn").onclick = () => post({ cmd: "toggle_menu" });
+  $("menu-btn").onclick = () => { closeNewTabPop(); post({ cmd: "toggle_menu" }); };
   $("back").onclick = () => post({ cmd: "back" });
   $("fwd").onclick = () => post({ cmd: "forward" });
   $("reload").onclick = () => post({ cmd: "reload" });
-  $("private-tab").onclick = () => post({ cmd: "new_private_tab" });
+
+  // New tab: a click offers a normal or a private tab; Shift+click opens a normal one straight
+  // away, Shift+right-click a private one.
+  const newTabPop = $("newtab-pop");
+  function closeNewTabPop() { newTabPop.classList.remove("open"); }
+  $("newtab").onclick = (e) => {
+    e.stopPropagation();
+    // Collapsed, the chooser has no room: a plain click opens a normal tab.
+    if (e.shiftKey || document.body.classList.contains("collapsed")) { closeNewTabPop(); post({ cmd: "new_tab" }); return; }
+    newTabPop.classList.toggle("open");
+  };
+  $("newtab").oncontextmenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeNewTabPop();
+    if (e.shiftKey) post({ cmd: "new_private_tab" });
+    else newTabPop.classList.add("open");
+  };
+  newTabPop.querySelectorAll("button").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      closeNewTabPop();
+      post({ cmd: b.dataset.kind === "private" ? "new_private_tab" : "new_tab" });
+    };
+  });
+  document.addEventListener("click", closeNewTabPop);
+  addEventListener("keydown", (e) => { if (e.key === "Escape") closeNewTabPop(); });
+  addEventListener("blur", closeNewTabPop);
+
+  // Sidebar width: drag its right edge. The page area follows live; the width is saved on release.
+  const resizer = $("side-resize");
+  resizer.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    resizer.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const border = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--win-border")) || 3;
+    let last = 0, frame = 0;
+    const widthAt = (x) => Math.round(Math.min(520, Math.max(180, x - border)));
+    const move = (ev) => {
+      last = widthAt(ev.clientX);
+      fxRoot.setProperty("--sidebar-w", last + "px");
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; post({ cmd: "sidebar_width", w: last }); });
+    };
+    const up = () => {
+      resizer.removeEventListener("pointermove", move);
+      resizer.removeEventListener("pointerup", up);
+      resizer.removeEventListener("pointercancel", up);
+      document.body.classList.remove("resizing");
+      if (last) post({ cmd: "sidebar_width", w: last, done: true });
+    };
+    resizer.addEventListener("pointermove", move);
+    resizer.addEventListener("pointerup", up);
+    resizer.addEventListener("pointercancel", up);
+  });
   $("star").onclick = () => post({ cmd: "toggle_bookmark" });
   $("shield").onclick = () => post({ cmd: "toggle_site_adblock" });
   $("sidebar-toggle").onclick = () => post({ cmd: "toggle_sidebar" });
@@ -1234,6 +1355,8 @@
       applyFx(s.fx, s.ambient);
       fxRoot.setProperty("--content-left", (vertical && !flyout ? (L.sidebar || 0) : 0) + "px");
       fxRoot.setProperty("--win-border", (L.border ?? 3) + "px");
+      if (L.sidebar_width && !document.body.classList.contains("resizing")) fxRoot.setProperty("--sidebar-w", L.sidebar_width + "px");
+      $("sidebar-toggle").title = L.collapsed ? "Expand the sidebar" : "Collapse the sidebar";
       fxRoot.setProperty("--content-top", (L.top || (vertical ? 48 : 82)) + "px");
 
       if (!flyout && L.bookmarks_bar) {
@@ -1284,21 +1407,8 @@
         : siteOff ? "Ad blocking is OFF for this site — click to turn it back on"
         : `Ad & tracker blocking on — ${s.blocked} blocked. Click to turn it off for this site`;
 
-      const exts = $("exts");
-      const sig = JSON.stringify(s.extensions.map((x) => [x.id, x.id === s.popup]));
-      if (exts.dataset.sig !== sig) {
-        exts.dataset.sig = sig;
-        exts.innerHTML = "";
-        for (const x of s.extensions) {
-          const b = document.createElement("button");
-          b.className = "btn ext" + (x.id === s.popup ? " open" : "");
-          b.title = x.name;
-          b.innerHTML = x.icon ? '<img alt="">' : "&#x25a3;";
-          if (x.icon) b.querySelector("img").src = x.icon;
-          b.onclick = () => post({ cmd: "ext_popup", id: x.id });
-          exts.appendChild(b);
-        }
-      }
+      // Extensions are listed in the menu now.
+      $("menu-btn").classList.toggle("open", s.popup === "menu");
     },
     focusAddress() { addr.focus(); addr.select(); },
     // Ctrl+Shift+A: search open tabs.
