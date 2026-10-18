@@ -1480,6 +1480,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
     let window = WindowBuilder::new()
+        .with_window_icon(tao::window::Icon::from_rgba(include_bytes!("../assets/icon-64.rgba").to_vec(), 64, 64).ok())
         .with_title("Hen Browser")
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 820.0))
         .with_decorations(false)

@@ -8,6 +8,14 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=assets/icon-res.o");
+    // The program icon (assets/icon.ico, precompiled into assets/icon-res.o).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64")
+    {
+        let dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        println!("cargo:rustc-link-arg-bins={}", dir.join("assets").join("icon-res.o").display());
+    }
     let arch = match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("x86_64") | Ok("arm64ec") => "x64",
         Ok("x86") => "x86",
