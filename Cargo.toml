@@ -1,9 +1,10 @@
 [package]
 name = "henbrowser"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.1"
+edition = "2024"
+authors = ["ChickenWM Contributors"]
+license = "MIT"
+repository = "https://github.com/despale-code/henbrowser"
 
 [dependencies]
 wry = "0.57"
@@ -16,14 +17,14 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 windows-core = "0.62"
 # Default `single-thread` off so the engine is Send and can be compiled on a background thread.
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
-serde = { workspace = true }
-serde_json = { workspace = true }
-anyhow = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+anyhow = { version = "1.0" }
 # Unpacking .crx / .zip extensions; SHA-256 for extension ids from their public keys.
-zip = { workspace = true }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
-tracing = { workspace = true }
-chickenwm-core = { workspace = true }
+tracing = { version = "0.1" }
+chickenwm-core = { git = "https://github.com/despale-code/chickenwm-core", tag = "v0.1.1" }
 
 [build-dependencies]
-serde_json = { workspace = true }
+serde_json = { version = "1.0" }
