@@ -24,7 +24,7 @@ anyhow = { version = "1.0" }
 zip = { version = "9.0", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 tracing = { version = "0.1" }
-chickenwm-core = { git = "https://github.com/despale-code/chickenwm-core", tag = "v0.1.1" }
+chickenwm-core = { git = "https://github.com/despale-code/chickenwm-core", tag = "v0.1.2" }
 
 [build-dependencies]
 serde_json = { version = "1.0" }
