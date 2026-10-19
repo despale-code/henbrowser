@@ -19,6 +19,7 @@ mod history;
 mod internal;
 mod settings;
 mod tabs;
+pub mod updates;
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -122,6 +123,7 @@ pub(crate) enum UserEvent {
     PageAmbient(u32, Vec<[u8; 3]>),
     AmbientFallback(u32),
     AmbientTick,
+    UpdateCheckResult(Result<updates::UpdateInfo, String>),
 }
 
 #[derive(Clone, Copy)]
@@ -195,6 +197,9 @@ pub(crate) struct Browser {
     pub(crate) open_when_done: std::collections::HashSet<u64>,
     /// A short status line on the download bar (extension installs), with when it was set.
     pub(crate) notice: Option<(String, Instant)>,
+    pub(crate) update_info: Option<updates::UpdateInfo>,
+    pub(crate) update_checking: bool,
+    pub(crate) update_error: Option<String>,
 }
 
 fn config_dir() -> PathBuf {
@@ -1601,8 +1606,19 @@ fn main() -> anyhow::Result<()> {
         shelf_visible: false,
         open_when_done: Default::default(),
         notice: None,
+        update_info: None,
+        update_checking: false,
+        update_error: None,
     };
     browser.build_suggest();
+    if browser.settings.updates.auto_check {
+        let proxy_upd = proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(4));
+            let res = updates::check_for_updates();
+            let _ = proxy_upd.send_event(UserEvent::UpdateCheckResult(res));
+        });
+    }
     let proxy_amb = proxy.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(1500));

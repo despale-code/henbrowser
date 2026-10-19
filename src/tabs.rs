@@ -217,7 +217,10 @@ impl Browser {
     pub(crate) fn open_tab_with(&mut self, url: &str, background: bool, private: bool) {
         let id = self.next_id;
         self.next_id += 1;
-        let is_settings = url == "about:settings";
+        let is_settings = url == "about:settings"
+            || url.starts_with("about:settings#")
+            || url == "hen://settings"
+            || url.starts_with("hen://settings#");
         let page_url = Rc::new(RefCell::new(url.to_owned()));
         let settings_page = Rc::new(Cell::new(is_settings));
         let bounds = self.content_rect();
@@ -288,7 +291,10 @@ impl Browser {
             });
 
         if is_settings {
-            builder = builder.with_html(include_str!("settings.html"));
+            let hash = url.split_once('#').map(|(_, h)| h).unwrap_or("");
+            builder = builder
+                .with_initialization_script(format!("window.__initHash = '#{hash}';"))
+                .with_html(include_str!("settings.html"));
         } else {
             builder = builder.with_url(url);
         }

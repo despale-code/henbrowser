@@ -14,8 +14,28 @@ pub struct BrowserSettings {
     pub privacy: PrivacySettings,
     pub reader: ReaderSettings,
     pub downloads: DownloadSettings,
+    pub updates: UpdateSettings,
     /// Per-site choices, keyed by `site_of` (`example.com`).
     pub sites: std::collections::BTreeMap<String, SiteSettings>,
+}
+
+/// Software update preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// Automatically check for updates on startup.
+    pub auto_check: bool,
+    /// Unix timestamp of the last update check.
+    pub last_checked: Option<u64>,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            auto_check: true,
+            last_checked: None,
+        }
+    }
 }
 
 /// Download directory and behavior options.
@@ -83,6 +103,7 @@ impl Default for BrowserSettings {
             privacy: PrivacySettings::default(),
             reader: ReaderSettings::default(),
             downloads: DownloadSettings::default(),
+            updates: UpdateSettings::default(),
             sites: Default::default(),
         }
     }

@@ -713,9 +713,9 @@
         <div class="card-row">
           <div class="card-info">
             <div class="card-title">Hen Browser</div>
-            <div class="card-desc">Version 0.1.0 (64-bit) &bull; Part of ChickenWM</div>
+            <div class="card-desc" id="about-ver-desc">Version 0.1.1 (64-bit) &bull; Part of ChickenWM</div>
           </div>
-          <span class="badge">v0.1.0</span>
+          <span class="badge" id="about-ver-badge">v0.1.1</span>
         </div>
         <div class="card-row">
           <div class="card-info">
@@ -723,6 +723,45 @@
             <div class="card-desc">Microsoft Edge WebView2 (Chromium)</div>
           </div>
           <span class="badge">WebView2</span>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">GitHub Repository</div>
+            <div class="card-desc">https://github.com/despale-code/henbrowser</div>
+          </div>
+          <a class="btn secondary" href="https://github.com/despale-code/henbrowser" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center;">Repository</a>
+        </div>
+      </div>
+
+      <h1 style="margin-top: 28px;">Software Updates</h1>
+      <div class="card">
+        <div class="card-row" style="align-items: flex-start;">
+          <div class="card-info" style="flex:1;">
+            <div class="card-title" id="update-status-title" style="display:flex;align-items:center;gap:8px;">
+              <span id="update-status-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              </span>
+              <span id="update-status-text">Check for updates</span>
+            </div>
+            <div class="card-desc" id="update-status-desc" style="margin-top:4px;">Check despale-code/henbrowser for new releases and improvements.</div>
+            <div id="update-details" style="display:none;margin-top:12px;padding:12px;background:var(--hover-bg);border:1px solid var(--border-color);border-radius:6px;">
+              <div style="font-weight:600;font-size:13px;" id="update-rel-title">Update Available</div>
+              <div style="color:var(--subtext-color);font-size:12px;margin:4px 0 8px;" id="update-rel-date"></div>
+              <div style="font-size:12px;white-space:pre-wrap;max-height:140px;overflow-y:auto;color:var(--fg-color);margin-bottom:12px;opacity:0.9;" id="update-rel-notes"></div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn" id="btn-update-now">Update Now</button>
+                <a class="btn secondary" id="btn-view-release" href="#" target="_blank" style="text-decoration:none;">View Release</a>
+              </div>
+            </div>
+          </div>
+          <button class="btn" id="btn-check-updates">Check now</button>
+        </div>
+        <div class="card-row">
+          <div class="card-info">
+            <div class="card-title">Check automatically on startup</div>
+            <div class="card-desc">Silently check the repository in the background when the browser opens</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="auto-update-toggle"><span class="knob"></span></label>
         </div>
       </div>
     </div>
@@ -966,8 +1005,88 @@
           + (state.toolbar_separate ? " (+ separate toolbar browser)" : "");
       document.getElementById("mem-usage").textContent =
         `${usage} • ${state.tabs} tabs, ${state.asleep} sleeping`;
+
+      if (state.updates) {
+        const u = state.updates;
+        if (u.current_version) {
+          const vDesc = document.getElementById("about-ver-desc");
+          const vBadge = document.getElementById("about-ver-badge");
+          if (vDesc) vDesc.innerHTML = `Version ${u.current_version} (64-bit) &bull; Part of ChickenWM`;
+          if (vBadge) vBadge.textContent = `v${u.current_version}`;
+        }
+        const autoCheck = document.getElementById("auto-update-toggle");
+        if (autoCheck) autoCheck.checked = !!u.auto_check;
+        const btnCheck = document.getElementById("btn-check-updates");
+        const statusText = document.getElementById("update-status-text");
+        const statusDesc = document.getElementById("update-status-desc");
+        const detailsBox = document.getElementById("update-details");
+
+        if (btnCheck && statusText && statusDesc && detailsBox) {
+          if (u.checking) {
+            btnCheck.disabled = true;
+            btnCheck.textContent = "Checking...";
+            statusText.textContent = "Checking repository...";
+            statusDesc.textContent = "Connecting to despale-code/henbrowser on GitHub...";
+            detailsBox.style.display = "none";
+          } else {
+            btnCheck.disabled = false;
+            btnCheck.textContent = "Check now";
+
+            if (u.error) {
+              statusText.textContent = "Update check failed";
+              statusDesc.textContent = u.error;
+              detailsBox.style.display = "none";
+            } else if (u.info) {
+              const info = u.info;
+              if (info.available) {
+                statusText.textContent = `Update available: ${info.latest_version}`;
+                statusDesc.textContent = `A newer release or commit is available on GitHub.`;
+                detailsBox.style.display = "block";
+                document.getElementById("update-rel-title").textContent = info.release_title || `Hen Browser ${info.latest_version}`;
+                document.getElementById("update-rel-date").textContent = info.published_at ? `Released ${new Date(info.published_at).toLocaleDateString()}` : "";
+                document.getElementById("update-rel-notes").textContent = info.release_notes || "";
+                const viewRel = document.getElementById("btn-view-release");
+                if (viewRel) viewRel.href = info.html_url || "https://github.com/despale-code/henbrowser";
+              } else {
+                statusText.textContent = "Hen Browser is up to date";
+                const lastChecked = u.last_checked ? `Checked ${new Date(u.last_checked * 1000).toLocaleTimeString()}` : "Checked just now";
+                statusDesc.textContent = `${lastChecked} • Version ${info.current_version}`;
+                detailsBox.style.display = "none";
+              }
+            } else if (u.last_checked) {
+              statusText.textContent = "Up to date";
+              statusDesc.textContent = `Last checked: ${new Date(u.last_checked * 1000).toLocaleString()}`;
+              detailsBox.style.display = "none";
+            }
+          }
+        }
+      }
     },
   };
+
+  const btnCheckUpdates = document.getElementById("btn-check-updates");
+  if (btnCheckUpdates) {
+    btnCheckUpdates.onclick = () => post({ cmd: "check_updates" });
+  }
+  const btnUpdateNow = document.getElementById("btn-update-now");
+  if (btnUpdateNow) {
+    btnUpdateNow.onclick = () => post({ cmd: "apply_update" });
+  }
+  const autoUpdateToggle = document.getElementById("auto-update-toggle");
+  if (autoUpdateToggle) {
+    autoUpdateToggle.onchange = (e) => {
+      post({ cmd: "set_updates", updates: { auto_check: e.target.checked } });
+    };
+  }
+
+  // Support direct anchor navigation (e.g. about:settings#about)
+  const initialHash = window.__initHash || location.hash || "";
+  if (initialHash) {
+    const targetTab = initialHash.replace("#", "");
+    const navItem = document.querySelector(`.nav-item[data-tab="${targetTab}"]`);
+    if (navItem) navItem.click();
+  }
+
   post({ cmd: "settings_ready" });
 </script>
 </body>

@@ -47,6 +47,7 @@ pub(crate) enum ToolbarCmd {
     FocusPage,
     ToggleMenu,
     OpenSettings,
+    OpenSettingsAbout,
     OpenBookmarks,
     OpenSites,
     ToggleBookmarksBar,
@@ -75,6 +76,9 @@ pub(crate) enum ToolbarCmd {
     SetPrivacy { privacy: settings::PrivacySettings },
     SetReader { reader: settings::ReaderSettings },
     SetDownloads { downloads: settings::DownloadSettings },
+    CheckUpdates,
+    SetUpdates { updates: settings::UpdateSettings },
+    ApplyUpdate,
     ToggleSiteAdblock,
     ToggleSiteSleep,
     ToggleSidebar,
@@ -825,6 +829,8 @@ impl Browser {
         let menu_state = json!({
             "extensions": self.extensions.iter().map(|e| json!({ "id": e.id, "name": e.name, "icon": e.icon })).collect::<Vec<_>>(),
             "autohide": self.settings.appearance.sidebar_autohide,
+            "update_available": self.update_info.as_ref().map_or(false, |u| u.available),
+            "latest_version": self.update_info.as_ref().map(|u| u.latest_version.clone()),
         });
         let built = profile_builder(&mut self.web_context, &self.settings.memory)
             .with_html(include_str!("menu.html"))
@@ -922,6 +928,14 @@ impl Browser {
             "extensions": self.extensions,
             "extensions_dir": self.paths.extensions.display().to_string(),
             "ext_notice": self.notice.as_ref().filter(|(_, at)| at.elapsed() < Duration::from_secs(30)).map(|(t, _)| t.as_str()),
+            "updates": {
+                "auto_check": self.settings.updates.auto_check,
+                "last_checked": self.settings.updates.last_checked,
+                "checking": self.update_checking,
+                "info": self.update_info,
+                "error": self.update_error,
+                "current_version": env!("CARGO_PKG_VERSION"),
+            },
         });
         for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
             let _ = tab.webview.evaluate_script(&format!("window.hbSettings && hbSettings.render({state})"));
@@ -1172,6 +1186,10 @@ impl Browser {
                         self.close_popup();
                         self.open_tab("about:settings");
                     }
+                    ToolbarCmd::OpenSettingsAbout => {
+                        self.close_popup();
+                        self.open_tab("about:settings#about");
+                    }
                     ToolbarCmd::EditCss => {
                         let _ = std::process::Command::new("notepad.exe")
                             .arg(&self.paths.css)
@@ -1291,6 +1309,17 @@ impl Browser {
                         self.save_settings();
                         self.apply_download_limits();
                         self.push_settings_state();
+                    }
+                    ToolbarCmd::CheckUpdates => self.check_for_updates(),
+                    ToolbarCmd::SetUpdates { updates } => {
+                        self.settings.updates = updates;
+                        self.save_settings();
+                        self.push_settings_state();
+                    }
+                    ToolbarCmd::ApplyUpdate => {
+                        if let Err(e) = crate::updates::update_now() {
+                            tracing::error!("failed to launch updater: {e}");
+                        }
                     }
                     ToolbarCmd::ToggleSiteAdblock => self.toggle_site_adblock(),
                     ToolbarCmd::ToggleSidebar => {
@@ -1743,9 +1772,70 @@ impl Browser {
                     self.push_settings_state();
                 }
             }
+            UserEvent::UpdateCheckResult(result) => {
+                self.update_checking = false;
+                match result {
+                    Ok(info) => {
+                        let newly_available = info.available && self.update_info.as_ref().map_or(true, |old| !old.available);
+                        self.update_info = Some(info.clone());
+                        self.update_error = None;
+                        self.settings.updates.last_checked = Some(
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                        );
+                        self.save_settings();
+                        if newly_available {
+                            notify_update_available(&info.latest_version, &info.release_title);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("update check failed: {e}");
+                        self.update_error = Some(e);
+                    }
+                }
+                self.push_settings_state();
+                self.sync_toolbar();
+            }
         }
         true
     }
+
+    pub(crate) fn check_for_updates(&mut self) {
+        if self.update_checking {
+            return;
+        }
+        self.update_checking = true;
+        self.update_error = None;
+        self.push_settings_state();
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let res = crate::updates::check_for_updates();
+            let _ = proxy.send_event(UserEvent::UpdateCheckResult(res));
+        });
+    }
+}
+
+fn notify_update_available(version: &str, title: &str) {
+    let body = format!("Version {version} is available: {title}");
+    std::thread::spawn(move || {
+        let cmd = chickenwm_core::ipc::IpcCommand::Notify(chickenwm_core::ipc::Notification {
+            app: "Hen Browser".to_string(),
+            title: "Hen Browser Update Available".to_string(),
+            body,
+            timeout_secs: Some(8),
+            urgency: Some("normal".to_string()),
+        });
+        if let Ok(mut encoded) = serde_json::to_vec(&cmd) {
+            encoded.push(b'\n');
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut file) = OpenOptions::new().write(true).open(r"\\.\pipe\chickenwm-notify-ipc") {
+                let _ = file.write_all(&encoded);
+            }
+        }
+    });
 }
 
 fn notify_download_complete(file_path: &str) {
