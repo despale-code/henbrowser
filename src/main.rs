@@ -799,9 +799,21 @@ pub(crate) fn start_page_html(data: &internal::InternalData) -> String {
         ));
     }
     let search = data.search.split('?').next().unwrap_or(&data.search);
+    let history_items: Vec<serde_json::Value> = data
+        .history
+        .iter()
+        .take(60)
+        .map(|e| serde_json::json!({
+            "url": e.url,
+            "title": e.title,
+            "visits": e.visits
+        }))
+        .collect();
+    let history_json = serde_json::to_string(&history_items).unwrap_or_else(|_| "[]".to_string());
     let mut html = include_str!("start.html")
         .replace("<!--THEME-->", &data.theme)
         .replace("<!--SEARCH-->", &html_escape(search))
+        .replace("<!--HISTORY_DATA-->", &history_json)
         .replace("<!--SECTIONS-->", &sections);
     if !data.show_search {
         html = html.replace(
@@ -1426,6 +1438,34 @@ fn focus_existing_instance() -> bool {
 
 fn main() -> anyhow::Result<()> {
     chickenwm_core::init_tracing("henbrowser");
+
+    // Explicit AppUserModelID groups the main process and child webview windows in Task Manager and shell taskbars.
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+            windows::core::w!("ChickenWM.HenBrowser"),
+        );
+    }
+
+    // Windows Job Object: manages all child processes (including msedgewebview2.exe renderer/gpu/utility
+    // processes) in a unified job so Task Manager groups child processes and terminates them on exit.
+    let _job = unsafe {
+        use windows::Win32::System::JobObjects::*;
+        use windows::Win32::System::Threading::GetCurrentProcess;
+        if let Ok(job) = CreateJobObjectW(None, None) {
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let _ = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            let _ = AssignProcessToJobObject(job, GetCurrentProcess());
+            Some(job)
+        } else {
+            None
+        }
+    };
 
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let restarting = args.first().is_some_and(|a| a == "--wait-for-exit");

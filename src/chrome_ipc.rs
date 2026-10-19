@@ -618,8 +618,9 @@ impl Browser {
         if let (Some(s), true) = (&self.shelf, self.shelf_visible) {
             let _ = s.set_bounds(self.shelf_rect());
         }
-        if let Some(tab) = self.tabs.get(self.active) {
-            let _ = tab.webview.set_bounds(self.content_rect());
+        let content_bounds = self.content_rect();
+        for tab in &self.tabs {
+            let _ = tab.webview.set_bounds(content_bounds);
         }
         if let Some(popup) = &self.popup {
             let bounds = if popup.extension_id == "menu" {
@@ -962,6 +963,8 @@ impl Browser {
         appearance.vertical_tabs = true;
         let relayout = appearance.vertical_tabs != self.settings.appearance.vertical_tabs
             || appearance.sidebar_collapsed != self.settings.appearance.sidebar_collapsed
+            || appearance.sidebar_autohide != self.settings.appearance.sidebar_autohide
+            || appearance.sidebar_width != self.settings.appearance.sidebar_width
             || appearance.show_bookmarks_bar != self.settings.appearance.show_bookmarks_bar;
         let theme_changed = appearance.theme != self.settings.appearance.theme;
         self.settings.appearance = appearance;

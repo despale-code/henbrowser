@@ -11,7 +11,7 @@ wry = "0.57"
 tao = "0.37"
 webview2-com = "0.39"
 # Must match the version webview2-com is built against (COM types cross the boundary).
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_Security", "Win32_System_Com", "Win32_System_Com_Urlmon", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_Shell"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_Security", "Win32_System_Com", "Win32_System_Com_Urlmon", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_Shell", "Win32_System_JobObjects"] }
 # Decodes page captures for the ambient glow.
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 windows-core = "0.62"

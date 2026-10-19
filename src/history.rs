@@ -142,7 +142,11 @@ impl History {
 
     /// Best matches for what has been typed so far.
     pub fn query(&self, text: &str, limit: usize) -> Vec<Entry> {
-        let Some(needle) = Needle::new(text) else { return Vec::new() };
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return self.top_sites(limit);
+        }
+        let Some(needle) = Needle::new(trimmed) else { return Vec::new() };
         let t = now();
         let mut scored: Vec<(u64, &Entry)> = self
             .entries

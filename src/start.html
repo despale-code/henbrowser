@@ -72,16 +72,186 @@
   a.tile img { width: 16px; height: 16px; flex: none; }
   a.tile span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .empty { color: var(--faint-color); }
+  #search-wrap {
+    position: relative;
+    width: 100%;
+  }
+  .recs {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: 0 12px 32px var(--shadow-color, rgba(0, 0, 0, 0.22));
+    z-index: 50;
+    padding: 4px;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .rec-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: calc(var(--border-radius) - 3px);
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--fg-color);
+    transition: background 80ms;
+  }
+  .rec-item:hover, .rec-item.active {
+    background: var(--hover-bg);
+  }
+  .rec-icon {
+    font-size: 13px;
+    opacity: 0.65;
+    flex: none;
+  }
+  .rec-title {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    max-width: 55%;
+  }
+  .rec-url {
+    color: var(--subtext-color);
+    opacity: 0.75;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1 1 0;
+  }
 </style>
 </head>
 <body>
 <main>
-  <form action="<!--SEARCH-->" method="get" id="search">
-    <input name="q" placeholder="Search or type an address" autofocus autocomplete="off">
-  </form>
+  <div id="search-wrap">
+    <form action="<!--SEARCH-->" method="get" id="search">
+      <input name="q" placeholder="Search or type an address" autofocus autocomplete="off">
+    </form>
+    <div id="recommendations" class="recs"></div>
+  </div>
   <!--SECTIONS-->
 </main>
 <script>
+  const historyData = <!--HISTORY_DATA-->;
+  const input = document.querySelector('input[name="q"]');
+  const recsBox = document.getElementById("recommendations");
+  let activeIndex = -1;
+  let currentMatches = [];
+
+  // Immediate autofocus on load/DOMContentLoaded/page show
+  const focusInput = () => {
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  };
+  focusInput();
+  window.addEventListener("DOMContentLoaded", focusInput);
+  window.addEventListener("load", focusInput);
+  window.addEventListener("pageshow", focusInput);
+  setTimeout(focusInput, 30);
+  setTimeout(focusInput, 120);
+
+  const cleanUrl = (u) => (u || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+
+  function renderRecs(matches) {
+    currentMatches = matches;
+    activeIndex = -1;
+    if (!matches || matches.length === 0) {
+      recsBox.style.display = "none";
+      recsBox.innerHTML = "";
+      return;
+    }
+    recsBox.innerHTML = "";
+    matches.forEach((item, idx) => {
+      const row = document.createElement("div");
+      row.className = "rec-item";
+      row.dataset.index = idx;
+
+      const icon = document.createElement("span");
+      icon.className = "rec-icon";
+      icon.textContent = "\u23F1";
+
+      const title = document.createElement("span");
+      title.className = "rec-title";
+      title.textContent = item.title || cleanUrl(item.url);
+
+      const url = document.createElement("span");
+      url.className = "rec-url";
+      url.textContent = cleanUrl(item.url);
+
+      row.append(icon, title, url);
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        location.href = item.url;
+      });
+      recsBox.appendChild(row);
+    });
+    recsBox.style.display = "flex";
+  }
+
+  function filterHistory(query) {
+    query = (query || "").trim().toLowerCase();
+    if (!Array.isArray(historyData)) return [];
+    if (!query) {
+      return historyData.slice(0, 6);
+    }
+    return historyData.filter(item => {
+      const u = (item.url || "").toLowerCase();
+      const t = (item.title || "").toLowerCase();
+      return u.includes(query) || t.includes(query);
+    }).slice(0, 8);
+  }
+
+  if (input) {
+    input.addEventListener("focus", () => {
+      const matches = filterHistory(input.value);
+      if (matches.length > 0) renderRecs(matches);
+    });
+
+    input.addEventListener("input", () => {
+      const matches = filterHistory(input.value);
+      renderRecs(matches);
+    });
+
+    input.addEventListener("blur", () => {
+      setTimeout(() => { recsBox.style.display = "none"; }, 160);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (recsBox.style.display === "none" || currentMatches.length === 0) return;
+      const items = recsBox.querySelectorAll(".rec-item");
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        activeIndex = (activeIndex + 1) % currentMatches.length;
+        items.forEach((it, i) => it.classList.toggle("active", i === activeIndex));
+        if (activeIndex >= 0) input.value = currentMatches[activeIndex].url;
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        activeIndex = (activeIndex - 1 + currentMatches.length) % currentMatches.length;
+        items.forEach((it, i) => it.classList.toggle("active", i === activeIndex));
+        if (activeIndex >= 0) input.value = currentMatches[activeIndex].url;
+      } else if (e.key === "Enter") {
+        if (activeIndex >= 0 && activeIndex < currentMatches.length) {
+          e.preventDefault();
+          location.href = currentMatches[activeIndex].url;
+        }
+      } else if (e.key === "Escape") {
+        recsBox.style.display = "none";
+      }
+    });
+  }
+
   // A typed address goes straight there; anything else is a search.
   document.getElementById("search").addEventListener("submit", (e) => {
     const v = e.target.q.value.trim();

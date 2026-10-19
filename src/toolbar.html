@@ -626,13 +626,17 @@
 
   /* Grain, like Zen: static fractal noise blended into whatever is under it. */
   #fx-noise {
+    position: fixed;
     inset: 0;
-    transition: opacity 900ms var(--anim-smooth);
-    opacity: calc(var(--fx-noise) * 0.6);
+    z-index: 90;
+    pointer-events: none;
+    transition: opacity 300ms var(--anim-smooth);
+    opacity: calc(var(--fx-noise) * 0.7);
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     background-size: 180px 180px;
   }
+  body.flyout #fx-noise { display: block !important; }
 
   /* With effects on, the surfaces let them through. */
   body.fx #row { background: transparent; }
@@ -843,13 +847,13 @@
     bottom: 0;
     box-shadow: 6px 0 32px var(--shadow-color);
     transform: translateX(-104%);
-    transition: transform 260ms var(--anim-bezier), background-color var(--theme-fade);
+    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background-color var(--theme-fade);
     background:
       radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--accent-color) calc(var(--fx-gradient) * 18%), transparent), transparent),
       var(--sidebar-bg);
   }
   body.flyout.open #side { transform: none; }
-  body.flyout.open.closing #side { transform: translateX(-104%); transition-duration: 180ms; }
+  body.flyout.open.closing #side { transform: translateX(-104%); transition-duration: 220ms; }
   body.flyout.open.closing #tabs { transform: none !important; }
 
   /* The bookmarks bar runs along the top of the page, right of the sidebar. */
@@ -973,8 +977,8 @@
   <div id="fx" aria-hidden="true">
     <div id="fx-gradient"></div>
     <div id="fx-ambient"><div id="fx-wash"></div><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span></div>
-    <div id="fx-noise"></div>
   </div>
+  <div id="fx-noise" aria-hidden="true"></div>
   <div id="page-edge" aria-hidden="true"></div>
   <div class="grip" id="grip-n"></div>
   <div class="grip" id="grip-nw"></div>
@@ -1146,7 +1150,7 @@
             document.body.classList.remove("open", "closing");
             post({ cmd: "sidebar_peek", show: false });
           }
-        }, 180);
+        }, 220);
       }, 120);
     });
     document.documentElement.addEventListener("mouseenter", () => {
@@ -1181,7 +1185,6 @@
   addr.addEventListener("input", () => {
     typed = addr.value;
     suggestSel = -1;
-    if (!typed.trim()) { hideSuggest(); return; }
     const r = field.getBoundingClientRect();
     post({ cmd: "suggest", text: typed, x: r.left, w: r.width, y: r.bottom });
   });
@@ -1204,12 +1207,19 @@
       addr.blur(); post({ cmd: "focus_page" });
     }
   });
-  addr.addEventListener("focus", () => { field.classList.add("focus"); addr.value = currentUrl; addr.select(); });
+  addr.addEventListener("focus", () => {
+    field.classList.add("focus");
+    addr.value = currentUrl;
+    addr.select();
+    typed = addr.value;
+    const r = field.getBoundingClientRect();
+    post({ cmd: "suggest", text: typed, x: r.left, w: r.width, y: r.bottom });
+  });
   addr.addEventListener("blur", () => {
     field.classList.remove("focus");
     addr.value = pretty(currentUrl);
     // Delayed: a click on the dropdown moves focus before its own mousedown is handled.
-    setTimeout(() => { if (document.activeElement !== addr) hideSuggest(); }, 150);
+    setTimeout(() => { if (document.activeElement !== addr) hideSuggest(); }, 160);
   });
   tabsEl.addEventListener("wheel", (e) => { if (!vertical) tabsEl.scrollLeft += e.deltaY; }, { passive: true });
 

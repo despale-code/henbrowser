@@ -362,6 +362,9 @@ impl Browser {
             self.send_to_background(self.tabs.len() - 1);
         } else {
             self.active = self.tabs.len() - 1;
+            if let Some(tab) = self.tabs.last() {
+                let _ = tab.webview.focus();
+            }
         }
         if self.tabs.len() == 1 {
             self.apply_profile();
