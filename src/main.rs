@@ -57,7 +57,7 @@ pub(crate) const SHELF_H: f64 = 46.0; // download bar along the bottom
 pub(crate) const SIDEBAR_MIN_W: f64 = 180.0;
 pub(crate) const SIDEBAR_MAX_W: f64 = 520.0;
 pub(crate) const SIDEBAR_COLLAPSED_W: f64 = 56.0;
-pub(crate) const SIDEBAR_STRIP_W: f64 = 6.0;
+pub(crate) const SIDEBAR_STRIP_W: f64 = 16.0;
 pub(crate) const POPUP_W: f64 = 380.0;
 pub(crate) const POPUP_H: f64 = 560.0;
 pub(crate) const SUGGEST_ROW_H: f64 = 34.0;
@@ -98,7 +98,7 @@ pub(crate) enum UserEvent {
     OpenTab(String),
     Shortcut(Shortcut),
     AdblockReady(Box<adblock::Engine>),
-    Blocked(u32),
+    Blocked,
     Extensions(Vec<ExtensionInfo>),
     RefreshExtensions,
     /// An extension package was unpacked into the extensions folder (or failed to).
@@ -129,6 +129,7 @@ pub(crate) enum Shortcut {
     NewTab,
     NewPrivateTab,
     CloseTab,
+    ReopenClosedTab,
     FocusAddress,
     Reload,
     Back,
@@ -151,6 +152,7 @@ pub(crate) struct Paths {
     pub(crate) extensions: PathBuf,
     pub(crate) adblock: PathBuf,
     pub(crate) css: PathBuf,
+    pub(crate) downloads_history: PathBuf,
 }
 
 pub(crate) struct Browser {
@@ -159,6 +161,7 @@ pub(crate) struct Browser {
     pub(crate) tabs: Vec<Tab>,
     pub(crate) active: usize,
     pub(crate) next_id: u32,
+    pub(crate) closed_tabs: Vec<String>,
     pub(crate) popup: Option<Popup>,
     pub(crate) popup_closed: Option<(String, Instant)>,
     pub(crate) web_context: WebContext,
@@ -479,6 +482,28 @@ pub(crate) fn mode_apply_js(css: &str) -> String {
         "(function(css){{let el=document.getElementById('mode-theme');if(!el){{el=document.createElement('style');el.id='mode-theme';(document.head||document.documentElement).appendChild(el);}}el.textContent=css;}})({});",
         serde_json::to_string(css).unwrap_or_default()
     )
+}
+
+pub(crate) fn apply_network_conditions(core: &ICoreWebView2, speed_limit_kbps: u32) {
+    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+    let throughput = if speed_limit_kbps > 0 {
+        (speed_limit_kbps as f64) * 1024.0
+    } else {
+        -1.0
+    };
+    let params = serde_json::json!({
+        "offline": false,
+        "latency": 0,
+        "downloadThroughput": throughput,
+        "uploadThroughput": -1
+    }).to_string();
+    unsafe {
+        let _ = core.CallDevToolsProtocolMethod(
+            &windows::core::HSTRING::from("Network.emulateNetworkConditions"),
+            &windows::core::HSTRING::from(params),
+            &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(()))),
+        );
+    }
 }
 
 pub(crate) fn install_diagnostics(controller: &ICoreWebView2Controller, tab: u32) {
@@ -932,6 +957,7 @@ fn shortcut_for(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut>
     let key = |v: VIRTUAL_KEY| vk == v.0 as u32;
     Some(match (ctrl, shift, alt) {
         (true, false, false) if vk == b'T' as u32 => Shortcut::NewTab,
+        (true, true, false) if vk == b'T' as u32 => Shortcut::ReopenClosedTab,
         (true, true, false) if vk == b'N' as u32 => Shortcut::NewPrivateTab,
         (true, false, false) if vk == b'W' as u32 => Shortcut::CloseTab,
         (true, false, false) if vk == b'L' as u32 => Shortcut::FocusAddress,
@@ -1447,6 +1473,7 @@ fn main() -> anyhow::Result<()> {
         extensions: root.join("extensions"),
         adblock: root.join("adblock"),
         css: css_path,
+        downloads_history: root.join("downloads.json"),
     };
     let user_css = std::fs::read_to_string(&paths.css).unwrap_or_default();
     let history_path = paths.root.join("history.json");
@@ -1525,12 +1552,18 @@ fn main() -> anyhow::Result<()> {
     };
     install_shortcuts(&toolbar.controller(), proxy.clone(), false);
 
+    let initial_downloads: Vec<internal::Download> = std::fs::read_to_string(&paths.downloads_history)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
     let mut browser = Browser {
         window,
         toolbar,
         tabs: Vec::new(),
         active: 0,
         next_id: 1,
+        closed_tabs: Vec::new(),
         popup: None,
         popup_closed: None,
         web_context,
@@ -1555,7 +1588,10 @@ fn main() -> anyhow::Result<()> {
         flyout_visible: false,
         history: history::History::load(history_path),
         bookmarks: bookmarks::Bookmarks::load(bookmarks_path),
-        start: Default::default(),
+        start: std::sync::Arc::new(std::sync::Mutex::new(internal::InternalData {
+            downloads: initial_downloads,
+            ..Default::default()
+        })),
         suggest: None,
         suggest_visible: false,
         session_path,

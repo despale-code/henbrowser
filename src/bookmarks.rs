@@ -107,6 +107,7 @@ impl Bookmarks {
         }
     }
 
+    #[allow(dead_code)]
     pub fn folders(&self) -> Vec<String> {
         let mut set = std::collections::BTreeSet::new();
         for b in &self.items {

@@ -13,8 +13,31 @@ pub struct BrowserSettings {
     pub appearance: AppearanceSettings,
     pub privacy: PrivacySettings,
     pub reader: ReaderSettings,
+    pub downloads: DownloadSettings,
     /// Per-site choices, keyed by `site_of` (`example.com`).
     pub sites: std::collections::BTreeMap<String, SiteSettings>,
+}
+
+/// Download directory and behavior options.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct DownloadSettings {
+    /// Custom download directory path (empty string = system default Downloads folder).
+    pub directory: String,
+    /// Always ask where to save each file.
+    pub always_ask: bool,
+    /// Speed limit in KB/s (0 = unlimited).
+    pub speed_limit_kbps: u32,
+}
+
+impl Default for DownloadSettings {
+    fn default() -> Self {
+        Self {
+            directory: String::new(),
+            always_ask: false,
+            speed_limit_kbps: 0,
+        }
+    }
 }
 
 /// Reader mode typography settings.
@@ -59,6 +82,7 @@ impl Default for BrowserSettings {
             appearance: AppearanceSettings::default(),
             privacy: PrivacySettings::default(),
             reader: ReaderSettings::default(),
+            downloads: DownloadSettings::default(),
             sites: Default::default(),
         }
     }

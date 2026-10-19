@@ -120,6 +120,7 @@ pub(crate) fn show_in_folder(path: &str) {
 pub(crate) fn install_downloads(
     controller: &ICoreWebView2Controller,
     proxy: EventLoopProxy<UserEvent>,
+    download_dir: String,
 ) {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let Ok(core4) =
@@ -141,11 +142,23 @@ pub(crate) fn install_downloads(
                     op.Uri(&mut p)?;
                     webview2_com::take_pwstr(p)
                 };
-                let path = {
+                let mut path = {
                     let mut p = windows::core::PWSTR::null();
                     args.ResultFilePath(&mut p)?;
                     webview2_com::take_pwstr(p)
                 };
+                if !download_dir.is_empty() {
+                    let dir = std::path::Path::new(&download_dir);
+                    if dir.exists() {
+                        if let Some(fname) = std::path::Path::new(&path).file_name() {
+                            let new_path = dir.join(fname);
+                            let new_path_str = new_path.to_string_lossy().to_string();
+                            let hstr = windows::core::HSTRING::from(&new_path_str);
+                            let _ = args.SetResultFilePath(&hstr);
+                            path = new_path_str;
+                        }
+                    }
+                }
                 // Snapshot of the operation's progress as a `Download`.
                 let snapshot: Snapshot = std::rc::Rc::new({
                     let (url, path) = (url.clone(), path.clone());

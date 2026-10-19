@@ -67,6 +67,24 @@ impl History {
         self.save_if_dirty();
     }
 
+    pub fn clear_since(&mut self, cutoff: u64) {
+        let before = self.entries.len();
+        self.entries.retain(|e| e.last < cutoff);
+        if self.entries.len() != before {
+            self.dirty = true;
+            self.save_if_dirty();
+        }
+    }
+
+    pub fn clear_range(&mut self, range: Option<&str>) {
+        match range {
+            Some("hour") => self.clear_since(now().saturating_sub(3600)),
+            Some("day") => self.clear_since(now().saturating_sub(86400)),
+            Some("week") => self.clear_since(now().saturating_sub(7 * 86400)),
+            _ => self.clear(),
+        }
+    }
+
     pub fn visit(&mut self, url: &str) {
         let Some(url) = canonical(url) else { return };
         self.dirty = true;
@@ -261,5 +279,36 @@ mod tests {
         ]);
         let top: Vec<String> = h.top_sites(8).into_iter().map(|e| e.url).collect();
         assert_eq!(top, ["https://news.ycombinator.com/", "https://rust-lang.org/"]);
+    }
+
+    #[test]
+    fn clear_time_ranges() {
+        let now = now();
+        let mut h = history(&[
+            ("https://example.com/recent", "Recent", 1, now - 300), // 5 mins ago
+            ("https://example.com/earlier-today", "Today", 1, now - 7200), // 2 hours ago
+            ("https://example.com/this-week", "Week", 1, now - 100_000), // ~1.1 days ago
+            ("https://example.com/ancient", "Ancient", 1, now - 1_000_000), // ~11 days ago
+        ]);
+        assert_eq!(h.entries().len(), 4);
+
+        // Clear last 1 hour: drops "recent", keeps 3
+        h.clear_range(Some("hour"));
+        assert_eq!(h.entries().len(), 3);
+        assert!(!h.entries().iter().any(|e| e.url.ends_with("/recent")));
+
+        // Clear last 24 hours: drops "earlier-today", keeps 2
+        h.clear_range(Some("day"));
+        assert_eq!(h.entries().len(), 2);
+        assert!(!h.entries().iter().any(|e| e.url.ends_with("/earlier-today")));
+
+        // Clear last 7 days: drops "this-week", keeps "ancient"
+        h.clear_range(Some("week"));
+        assert_eq!(h.entries().len(), 1);
+        assert_eq!(h.entries()[0].url, "https://example.com/ancient");
+
+        // Clear all
+        h.clear_range(Some("all"));
+        assert_eq!(h.entries().len(), 0);
     }
 }

@@ -19,9 +19,15 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{take_pwstr, WebResourceRequestedEventHandler};
 use windows_core::{Interface, HSTRING, PWSTR};
 
-const LISTS: [(&str, &str); 2] = [
+const LISTS: [(&str, &str); 8] = [
     ("easylist.txt", "https://easylist.to/easylist/easylist.txt"),
     ("easyprivacy.txt", "https://easylist.to/easylist/easyprivacy.txt"),
+    ("ublock-filters.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"),
+    ("ublock-badware.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt"),
+    ("ublock-privacy.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt"),
+    ("ublock-quick-fixes.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/quick-fixes.txt"),
+    ("ublock-unbreak.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt"),
+    ("peter-lowe.txt", "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext"),
 ];
 const REFRESH_AFTER: Duration = Duration::from_secs(4 * 24 * 60 * 60);
 
@@ -30,6 +36,19 @@ pub type SharedEngine = Rc<RefCell<Option<Engine>>>;
 
 /// Sites (see `settings::site_of`) where blocking is turned off from the shield button.
 pub type SharedAllowlist = Rc<RefCell<Vec<String>>>;
+
+/// Extracts cosmetic CSS rules (element hiding selectors) for a given URL.
+pub fn cosmetic_css_for_url(engine: &Engine, url: &str) -> Option<String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    let res = engine.url_cosmetic_resources(url);
+    if res.hide_selectors.is_empty() {
+        return None;
+    }
+    let selectors: Vec<&str> = res.hide_selectors.iter().map(|s| s.as_str()).collect();
+    Some(format!("{} {{ display: none !important; }}", selectors.join(",\n")))
+}
 
 /// Returns the list text, downloading it first if it's missing or stale. A failed refresh falls
 /// back to the cached copy.
@@ -103,7 +122,7 @@ pub fn install(
     allowlist: SharedAllowlist,
     page_url: Rc<RefCell<String>>,
     proxy: EventLoopProxy<UserEvent>,
-    tab_id: u32,
+    _tab_id: u32,
 ) -> windows_core::Result<()> {
     unsafe {
         let webview = controller.CoreWebView2()?;
@@ -158,7 +177,7 @@ pub fn install(
                     )?;
                     args.SetResponse(&response)?;
                     tracing::debug!("blocked {} request {uri} (page {source})", request_type(context));
-                    let _ = proxy.send_event(UserEvent::Blocked(tab_id));
+                    let _ = proxy.send_event(UserEvent::Blocked);
                 }
                 Ok(())
             })),
@@ -166,4 +185,19 @@ pub fn install(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cosmetic_resources() {
+        let mut set = FilterSet::new(false);
+        set.add_filter_list("example.com##.ad-box\n||doubleclick.net^".to_string(), ParseOptions::default());
+        let engine = Engine::new_with_filter_set(set);
+        let css = cosmetic_css_for_url(&engine, "https://example.com/").expect("has cosmetic css");
+        assert!(css.contains(".ad-box"));
+        assert!(css.contains("display: none !important;"));
+    }
 }

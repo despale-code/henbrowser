@@ -14,7 +14,7 @@ use wry::{NewWindowResponse, PageLoadEvent, WebView};
 use crate::{
     adblock_filter, downloads, install_diagnostics, install_favicon, install_shortcuts, internal,
     internal_mode_init, profile_builder, serve_internal, settings, show_settings_page,
-    theme_init_script, Browser, UserEvent, PRIVATE_START_URL,
+    theme_init_script, Browser, UserEvent, HOME, PRIVATE_START_URL,
 };
 
 pub(crate) struct Tab {
@@ -319,8 +319,13 @@ impl Browser {
         install_shortcuts(&controller, self.proxy.clone(), true);
         install_diagnostics(&controller, id);
         install_favicon(&controller, id, self.proxy.clone());
-        downloads::install_downloads(&controller, self.proxy.clone());
+        downloads::install_downloads(&controller, self.proxy.clone(), self.settings.downloads.directory.clone());
         install_history_changed(&controller, self.proxy.clone());
+        if self.settings.downloads.speed_limit_kbps > 0 {
+            if let Ok(core) = unsafe { controller.CoreWebView2() } {
+                crate::apply_network_conditions(&core, self.settings.downloads.speed_limit_kbps);
+            }
+        }
         if !private && !self.extensions_loaded {
             self.extensions_loaded = true;
         }
@@ -486,6 +491,13 @@ impl Browser {
     pub(crate) fn close_tab(&mut self, index: usize) -> bool {
         if index >= self.tabs.len() {
             return true;
+        }
+        let tab = &self.tabs[index];
+        if !tab.private && tab.url != HOME && !tab.url.is_empty() && !tab.url.starts_with("about:") {
+            self.closed_tabs.push(tab.url.clone());
+            if self.closed_tabs.len() > 30 {
+                self.closed_tabs.remove(0);
+            }
         }
         self.tabs.remove(index);
         if self.tabs.is_empty() {

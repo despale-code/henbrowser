@@ -7,9 +7,9 @@
 //! the protocol handler turns them into `UserEvent`s and redirects back to the page.
 
 use crate::history;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Download {
     pub id: u64,
     pub url: String,
@@ -175,6 +175,12 @@ const HISTORY_BODY: &str = r#"
 <div class="head">
   <h1>History</h1>
   <input id="q" placeholder="Search history" spellcheck="false" autofocus>
+  <select id="time-range" class="btn" style="border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 4px; background: var(--bg-color); color: var(--fg-color);">
+    <option value="hour">Last 1 hour</option>
+    <option value="day">Last 24 hours</option>
+    <option value="week">Last 7 days</option>
+    <option value="all" selected>All time</option>
+  </select>
   <button class="btn" id="clear">Clear history</button>
 </div>
 <div class="count" id="count"></div>
@@ -264,7 +270,18 @@ const HISTORY_BODY: &str = r#"
 
   window.hbHistory = { render(list) { entries = list; render(); } };
   $("q").addEventListener("input", render);
-  $("clear").onclick = () => { if (confirm("Clear all browsing history?")) post({ cmd: "clear_history" }); };
+  $("clear").onclick = () => {
+    const range = $("time-range").value;
+    const labels = {
+      hour: "browsing history from the last hour",
+      day: "browsing history from the last 24 hours",
+      week: "browsing history from the last 7 days",
+      all: "all browsing history"
+    };
+    if (confirm("Clear " + (labels[range] || "browsing history") + "?")) {
+      post({ cmd: "clear_history", range });
+    }
+  };
   render();
 </script>
 "#;

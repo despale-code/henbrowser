@@ -705,13 +705,26 @@
   body.vertical .tab.leaving .title { opacity: 0; }
   body.vertical .tab.leaving, body.vertical .tab.entering { max-width: none !important; padding-left: 14px !important; }
 
-  /* Collapsing keeps every favicon where it is (no jump) and fades the titles out. */
-  body.vertical.collapsed .tab { padding: 0 0 0 14px; justify-content: flex-start; }
+  /* Collapsing keeps every favicon where it is and completely hides titles and close buttons */
+  body.vertical.collapsed .tab,
+  body.collapsed .tab,
+  body.collapsed #side .tab {
+    padding: 0 !important;
+    justify-content: center !important;
+  }
   body.vertical.collapsed .tab .title,
-  body.vertical.collapsed .tab .close { display: block; }
-  body.vertical.collapsed .tab .title { opacity: 0; transform: translateX(-8px); pointer-events: none; }
-  body.vertical.collapsed .tab .close { opacity: 0 !important; pointer-events: none; }
-  body.vertical #tabs { transition: width 380ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth); }
+  body.vertical.collapsed .tab .close,
+  body.collapsed .tab .title,
+  body.collapsed .tab .close,
+  body.collapsed #side .tab .title,
+  body.collapsed #side .tab .close {
+    display: none !important;
+  }
+  body.collapsed #tabs .tab .favicon,
+  body.vertical.collapsed #tabs .tab .favicon {
+    margin: 0 !important;
+  }
+  body.vertical #tabs { transition: width 320ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth); }
 
   /* Flyout: slides and fades with a soft shadow. */
   body.flyout #tabs {
@@ -802,22 +815,41 @@
   body.collapsed #side #field, body.collapsed #side #exts, body.collapsed #side .spacer { display: none; }
   body.collapsed #side-top, body.collapsed #side-bottom { flex-direction: column; height: auto; }
 
-  /* Auto-hide: a thin strip; hovering it slides the whole panel out (the flyout webview). */
-  body.autohide:not(.flyout) #side { width: 6px; padding: 0; overflow: hidden; }
+  /* Auto-hide: thin hover trigger strip along the left window edge */
+  #flyout-strip { display: none; }
+  body.flyout #flyout-strip {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    z-index: 99;
+    cursor: pointer;
+    background: transparent;
+    transition: background 160ms var(--anim-smooth);
+  }
+  body.flyout:not(.open) #flyout-strip:hover {
+    background: color-mix(in srgb, var(--accent-color) 45%, transparent);
+  }
+  body.flyout.open #flyout-strip { display: none; }
+
+  body.autohide:not(.flyout) #side { width: 16px; padding: 0; overflow: hidden; }
   body.autohide:not(.flyout) #side > * { visibility: hidden; }
-  body.autohide:not(.flyout) #side:hover { background: var(--accent-color); }
+  body.autohide:not(.flyout) #side:hover { background: color-mix(in srgb, var(--accent-color) 45%, transparent); }
   body.flyout #side {
     left: 0;
     top: 0;
     bottom: 0;
+    box-shadow: 6px 0 32px var(--shadow-color);
     transform: translateX(-104%);
-    transition: transform 280ms var(--anim-bezier), background-color var(--theme-fade);
+    transition: transform 260ms var(--anim-bezier), background-color var(--theme-fade);
     background:
       radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--accent-color) calc(var(--fx-gradient) * 18%), transparent), transparent),
       var(--sidebar-bg);
   }
   body.flyout.open #side { transform: none; }
-  body.flyout.open.closing #side { transform: translateX(-104%); transition-duration: 200ms; }
+  body.flyout.open.closing #side { transform: translateX(-104%); transition-duration: 180ms; }
   body.flyout.open.closing #tabs { transform: none !important; }
 
   /* The bookmarks bar runs along the top of the page, right of the sidebar. */
@@ -871,6 +903,21 @@
   body.collapsed #sidebar-toggle .chev { transform: scaleX(-1); }
   body.collapsed #menu-btn { display: none; }
   #menu-btn.open { background: var(--press-bg); }
+  #side-bottom {
+    height: 36px;
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 0 2px;
+  }
+  #side #menu-btn {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    margin: 0;
+  }
 
   /* New tab: normal or private. */
   #newtab-pop {
@@ -935,6 +982,8 @@
 
   <div id="win-border" aria-hidden="true"></div>
 
+  <div id="flyout-strip" title="Hover to expand sidebar"></div>
+
   <!-- Everything lives in the sidebar: navigation on top, the address field, the tabs, and the
        window's controls along the bottom. -->
   <div id="side">
@@ -964,7 +1013,12 @@
           <path class="chev" d="M12.5 5.5L10 8l2.5 2.5"/>
         </svg>
       </button>
-      <button id="pin" title="Keep the sidebar open (turn off auto-hide)">&#x1f4cc;</button>
+      <button id="pin" title="Keep the sidebar open (turn off auto-hide)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="17" x2="12" y2="22"/>
+          <path d="M5 17h14v-2l-2-3V6a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v6l-2 3v2z"/>
+        </svg>
+      </button>
       <button class="btn" id="newtab" title="New tab (Shift+click: new tab, Shift+right-click: new private tab)">&#x2b;</button>
       <div class="spacer"></div>
       <button class="btn" id="menu-btn" title="Menu: private tab, extensions, history, downloads, settings and more">
@@ -1064,13 +1118,23 @@
   $("sidebar-toggle").onclick = () => post({ cmd: "toggle_sidebar" });
   $("pin").onclick = () => post({ cmd: "toggle_sidebar_autohide" });
 
-  // Auto-hide: hovering the strip opens the panel (short delay so passing by doesn't).
+  // Auto-hide: hovering the strip opens the panel (fast sensitive response).
   let peekTimer = null;
+  const triggerPeek = () => {
+    if (!autohide || !vertical) return;
+    peekTimer = setTimeout(() => post({ cmd: "sidebar_peek", show: true }), 30);
+  };
   $("side").addEventListener("mouseenter", () => {
     if (flyout || !autohide || !vertical) return;
-    peekTimer = setTimeout(() => post({ cmd: "sidebar_peek", show: true }), 70);
+    triggerPeek();
   });
   $("side").addEventListener("mouseleave", () => { clearTimeout(peekTimer); });
+  const stripEl = $("flyout-strip");
+  if (stripEl) {
+    stripEl.addEventListener("mouseenter", () => {
+      post({ cmd: "sidebar_peek", show: true });
+    });
+  }
   // Flyout: slide back in when the pointer leaves the panel.
   let closeTimer = null;
   if (flyout) {
@@ -1082,8 +1146,8 @@
             document.body.classList.remove("open", "closing");
             post({ cmd: "sidebar_peek", show: false });
           }
-        }, 210);
-      }, 160);
+        }, 180);
+      }, 120);
     });
     document.documentElement.addEventListener("mouseenter", () => {
       clearTimeout(closeTimer);

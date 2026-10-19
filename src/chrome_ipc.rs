@@ -56,7 +56,7 @@ pub(crate) enum ToolbarCmd {
     ZoomReset,
     Print,
     Devtools,
-    ClearData,
+    ClearData { #[serde(default)] range: Option<String> },
     /// A Chrome Web Store link or id, or a `.crx` / `.zip` / folder path.
     InstallExtension { input: String },
     RemoveExtension { id: String },
@@ -74,6 +74,7 @@ pub(crate) enum ToolbarCmd {
     SetAppearance { appearance: settings::AppearanceSettings },
     SetPrivacy { privacy: settings::PrivacySettings },
     SetReader { reader: settings::ReaderSettings },
+    SetDownloads { downloads: settings::DownloadSettings },
     ToggleSiteAdblock,
     ToggleSiteSleep,
     ToggleSidebar,
@@ -99,7 +100,7 @@ pub(crate) enum ToolbarCmd {
     ClearDownloads,
     RemoveHistoryEntry { url: String },
     ForgetHistorySite { site: String },
-    ClearHistory,
+    ClearHistory { #[serde(default)] range: Option<String> },
     SuggestSel { sel: i32 },
     SuggestHide,
     ToggleBookmark,
@@ -129,7 +130,7 @@ impl Browser {
         let a = &self.settings.appearance;
         WIN_BORDER
             + match a.sidebar_collapsed {
-                _ if a.sidebar_autohide => SIDEBAR_STRIP_W,
+                _ if a.sidebar_autohide => 0.0,
                 true => SIDEBAR_COLLAPSED_W,
                 false => self.sidebar_width(),
             }
@@ -286,9 +287,11 @@ impl Browser {
         if let Ok(mut data) = self.start.lock() {
             data.downloads.retain(|x| x.id != id);
         }
-        // A file served as a download leaves the tab where it is.
+        // Trigger the download via an invisible iframe to prevent navigating away from current page
         if let Some(tab) = self.tabs.get(self.active) {
-            let _ = tab.webview.load_url(&d.url);
+            let encoded = serde_json::to_string(&d.url).unwrap_or_default();
+            let script = format!("(function(){{let f=document.createElement('iframe');f.style.display='none';f.src={encoded};document.body.appendChild(f);setTimeout(()=>f.remove(),60000);}})();");
+            let _ = tab.webview.evaluate_script(&script);
         }
         self.sync_shelf();
     }
@@ -377,37 +380,83 @@ impl Browser {
         }
     }
 
+    pub(crate) fn flyout_strip_rect(&self) -> Rect {
+        let (_, h) = self.logical_size();
+        Rect {
+            position: LogicalPosition::new(WIN_BORDER, WIN_BORDER).into(),
+            size: LogicalSize::new(SIDEBAR_STRIP_W, (h - 2.0 * WIN_BORDER).max(1.0)).into(),
+        }
+    }
+
+    pub(crate) fn ensure_flyout(&mut self) -> bool {
+        if self.flyout.is_some() {
+            return true;
+        }
+        let proxy = self.proxy.clone();
+        let rect = self.flyout_strip_rect();
+        let built = profile_builder(&mut self.web_context, &self.settings.memory)
+            .with_initialization_script("window.__HEN_FLYOUT = true;")
+            .with_html(include_str!("toolbar.html"))
+            .with_transparent(true)
+            .with_background_color((0, 0, 0, 0))
+            .with_bounds(rect)
+            .with_ipc_handler(move |req| {
+                let _ = proxy.send_event(UserEvent::Ipc(req.body().clone()));
+            })
+            .build_as_child(&self.window);
+        match built {
+            Ok(w) => {
+                let hwnd = w.hwnd();
+                unsafe {
+                    let _ = SetWindowPos(
+                        HWND(hwnd.0 as _),
+                        Some(HWND_TOP),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                }
+                self.flyout = Some(w);
+                true
+            }
+            Err(e) => {
+                tracing::warn!("couldn't create the tab panel: {e}");
+                false
+            }
+        }
+    }
+
     pub(crate) fn sidebar_peek(&mut self, show: bool) {
-        if !show {
+        if !(self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide) {
             if let Some(f) = &self.flyout {
                 let _ = f.set_visible(false);
             }
             self.flyout_visible = false;
             return;
         }
-        if !(self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide) {
-            return;
-        }
-        if self.flyout.is_none() {
-            let proxy = self.proxy.clone();
-            let rect = self.flyout_rect();
-            let built = profile_builder(&mut self.web_context, &self.settings.memory)
-                .with_initialization_script("window.__HEN_FLYOUT = true;")
-                .with_html(include_str!("toolbar.html"))
-                .with_transparent(true)
-                .with_background_color((0, 0, 0, 0))
-                .with_bounds(rect)
-                .with_ipc_handler(move |req| {
-                    let _ = proxy.send_event(UserEvent::Ipc(req.body().clone()));
-                })
-                .build_as_child(&self.window);
-            match built {
-                Ok(w) => self.flyout = Some(w),
-                Err(e) => {
-                    tracing::warn!("couldn't create the tab panel: {e}");
-                    return;
+        if !show {
+            if let Some(f) = &self.flyout {
+                let _ = f.set_bounds(self.flyout_strip_rect());
+                let hwnd = f.hwnd();
+                unsafe {
+                    let _ = SetWindowPos(
+                        HWND(hwnd.0 as _),
+                        Some(HWND_TOP),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
                 }
             }
+            self.flyout_visible = false;
+            return;
+        }
+        if !self.ensure_flyout() {
+            return;
         }
         let rect = self.flyout_rect();
         if let Some(f) = &self.flyout {
@@ -549,8 +598,18 @@ impl Browser {
     pub(crate) fn layout(&self) {
         let _ = self.toolbar.set_bounds(self.toolbar_rect());
         self.keep_toolbar_behind();
-        if let (Some(f), true) = (&self.flyout, self.flyout_visible) {
-            let _ = f.set_bounds(self.flyout_rect());
+        if let Some(f) = &self.flyout {
+            if self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide {
+                let bounds = if self.flyout_visible {
+                    self.flyout_rect()
+                } else {
+                    self.flyout_strip_rect()
+                };
+                let _ = f.set_bounds(bounds);
+                let _ = f.set_visible(true);
+            } else if !self.flyout_visible {
+                let _ = f.set_visible(false);
+            }
         }
         if let (Some(s), true) = (&self.shelf, self.shelf_visible) {
             let _ = s.set_bounds(self.shelf_rect());
@@ -849,6 +908,7 @@ impl Browser {
             "memory": self.settings.memory,
             "appearance": self.settings.appearance,
             "reader": self.settings.reader,
+            "downloads": self.settings.downloads,
             "sites": self.settings.sites,
             "system_dark": self.system_theme.mode == chickenwm_core::theme::ThemeMode::Dark,
             "app_mode": self.system_theme.app_mode("browser").as_str(),
@@ -865,6 +925,22 @@ impl Browser {
         });
         for tab in self.tabs.iter().filter(|t| t.settings_page.get()) {
             let _ = tab.webview.evaluate_script(&format!("window.hbSettings && hbSettings.render({state})"));
+        }
+    }
+
+    pub(crate) fn apply_download_limits(&self) {
+        for tab in &self.tabs {
+            if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
+                crate::apply_network_conditions(&core, self.settings.downloads.speed_limit_kbps);
+            }
+        }
+    }
+
+    pub(crate) fn save_downloads(&self) {
+        if let Ok(data) = self.start.lock() {
+            if let Ok(s) = serde_json::to_string(&data.downloads) {
+                let _ = std::fs::write(&self.paths.downloads_history, s);
+            }
         }
     }
 
@@ -953,6 +1029,7 @@ impl Browser {
                             data.downloads.retain(|x| x.id != id || matches!(x.state.as_str(), "in_progress" | "paused"));
                         }
                         self.open_when_done.remove(&id);
+                        self.save_downloads();
                         self.sync_shelf();
                     }
                     ToolbarCmd::RemoveHistoryEntry { url } => {
@@ -963,14 +1040,15 @@ impl Browser {
                         self.history.forget_site(&site);
                         self.push_history();
                     }
-                    ToolbarCmd::ClearHistory => {
-                        self.history.clear();
+                    ToolbarCmd::ClearHistory { range } => {
+                        self.history.clear_range(range.as_deref());
                         self.push_history();
                     }
                     ToolbarCmd::ClearDownloads => {
                         if let Ok(mut data) = self.start.lock() {
                             data.downloads.retain(|x| matches!(x.state.as_str(), "in_progress" | "paused"));
                         }
+                        self.save_downloads();
                         self.sync_shelf();
                     }
                     ToolbarCmd::SuggestSel { sel } => {
@@ -1133,9 +1211,10 @@ impl Browser {
                             let _ = c.OpenDevToolsWindow();
                         });
                     }
-                    ToolbarCmd::ClearData => {
+                    ToolbarCmd::ClearData { range } => {
                         self.close_popup();
-                        self.history.clear();
+                        self.history.clear_range(range.as_deref());
+                        self.push_history();
                         if let Some(tab) = self.tabs.get(self.active) {
                             if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
                                 if let Ok(c13) = core.cast::<ICoreWebView2_13>() {
@@ -1205,6 +1284,12 @@ impl Browser {
                     ToolbarCmd::SetReader { reader } => {
                         self.settings.reader = reader;
                         self.save_settings();
+                        self.push_settings_state();
+                    }
+                    ToolbarCmd::SetDownloads { downloads } => {
+                        self.settings.downloads = downloads;
+                        self.save_settings();
+                        self.apply_download_limits();
                         self.push_settings_state();
                     }
                     ToolbarCmd::ToggleSiteAdblock => self.toggle_site_adblock(),
@@ -1335,6 +1420,39 @@ impl Browser {
                 if !started {
                     if let Some(i) = self.tab_index(tab) {
                         self.apply_site_settings(i);
+                        let tab_url = self.tabs[i].url.clone();
+                        if let Some(engine) = self.engine.borrow().as_ref() {
+                            if !self.allowlist.borrow().iter().any(|site| crate::settings::url_on_site(&tab_url, site)) {
+                                if let Some(css) = crate::adblock_filter::cosmetic_css_for_url(engine, &tab_url) {
+                                    let script = format!(
+                                        "(function(){{let el=document.getElementById('hen-cosmetic-filter');if(!el){{el=document.createElement('style');el.id='hen-cosmetic-filter';(document.head||document.documentElement).appendChild(el);}}el.textContent={};}})();",
+                                        serde_json::to_string(&css).unwrap_or_default()
+                                    );
+                                    let _ = self.tabs[i].webview.evaluate_script(&script);
+                                }
+                            }
+                        }
+                        if tab_url.contains("youtube.com") {
+                            let yt_script = r#"
+                                (function() {
+                                    if (window.__henYtAdblock) return;
+                                    window.__henYtAdblock = true;
+                                    const skip = () => {
+                                        const ad = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+                                        const video = document.querySelector('video');
+                                        if (ad && video && isFinite(video.duration)) {
+                                            video.currentTime = video.duration;
+                                        }
+                                        const skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+                                        if (skipBtn) skipBtn.click();
+                                        const banners = document.querySelectorAll('ytd-banner-promo-renderer, #masthead-ad, ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer, ytd-player-legacy-desktop-watch-ads-renderer');
+                                        for (const b of banners) b.remove();
+                                    };
+                                    setInterval(skip, 250);
+                                })();
+                            "#;
+                            let _ = self.tabs[i].webview.evaluate_script(yt_script);
+                        }
                     }
                     self.refresh_extensions();
                     if self.tab_index(tab) == Some(self.active) {
@@ -1346,6 +1464,11 @@ impl Browser {
             UserEvent::Shortcut(s) => match s {
                 Shortcut::NewTab => return self.handle(UserEvent::Ipc(r#"{"cmd":"new_tab"}"#.into())),
                 Shortcut::NewPrivateTab => self.open_private_tab(),
+                Shortcut::ReopenClosedTab => {
+                    if let Some(url) = self.closed_tabs.pop() {
+                        self.open_tab(&url);
+                    }
+                }
                 Shortcut::Bookmark => self.toggle_bookmark(),
                 Shortcut::Reader => return self.handle(UserEvent::Ipc(r#"{"cmd":"reader"}"#.into())),
                 Shortcut::Pip => return self.handle(UserEvent::Ipc(r#"{"cmd":"pip"}"#.into())),
@@ -1381,7 +1504,7 @@ impl Browser {
                 *self.engine.borrow_mut() = Some(*engine);
                 self.sync_toolbar();
             }
-            UserEvent::Blocked(_) => {
+            UserEvent::Blocked => {
                 self.blocked += 1;
                 self.sync_toolbar();
             }
@@ -1522,8 +1645,11 @@ impl Browser {
             UserEvent::Download(d) => {
                 let mut is_new = false;
                 // Flagged to open when done (a click on its card while it was running).
-                if d.state == "completed" && self.open_when_done.remove(&d.id) {
-                    downloads::open_file(&d.path);
+                if d.state == "completed" {
+                    notify_download_complete(&d.path);
+                    if self.open_when_done.remove(&d.id) {
+                        downloads::open_file(&d.path);
+                    }
                 }
                 if let Ok(mut data) = self.start.lock() {
                     match data.downloads.iter_mut().find(|x| x.id == d.id) {
@@ -1534,6 +1660,7 @@ impl Browser {
                         }
                     }
                 }
+                self.save_downloads();
                 if is_new {
                     self.show_shelf();
                 } else {
@@ -1619,4 +1746,29 @@ impl Browser {
         }
         true
     }
+}
+
+fn notify_download_complete(file_path: &str) {
+    let name = std::path::Path::new(file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Download")
+        .to_string();
+    std::thread::spawn(move || {
+        let cmd = chickenwm_core::ipc::IpcCommand::Notify(chickenwm_core::ipc::Notification {
+            app: "Hen Browser".to_string(),
+            title: "Download complete".to_string(),
+            body: name,
+            timeout_secs: Some(5),
+            urgency: Some("normal".to_string()),
+        });
+        if let Ok(mut encoded) = serde_json::to_vec(&cmd) {
+            encoded.push(b'\n');
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut file) = OpenOptions::new().write(true).open(r"\\.\pipe\chickenwm-notify-ipc") {
+                let _ = file.write_all(&encoded);
+            }
+        }
+    });
 }
