@@ -9,7 +9,6 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod adblock_filter;
 mod bookmarks;
 mod chrome_ipc;
 mod downloads;
@@ -99,8 +98,6 @@ pub(crate) enum UserEvent {
     PageLoad { tab: u32, url: String, started: bool },
     OpenTab(String),
     Shortcut(Shortcut),
-    AdblockReady(Box<adblock::Engine>),
-    Blocked,
     Extensions(Vec<ExtensionInfo>),
     RefreshExtensions,
     /// An extension package was unpacked into the extensions folder (or failed to).
@@ -164,7 +161,6 @@ pub(crate) struct Paths {
     pub(crate) root: PathBuf,
     pub(crate) profile: PathBuf,
     pub(crate) extensions: PathBuf,
-    pub(crate) adblock: PathBuf,
     pub(crate) css: PathBuf,
     pub(crate) downloads_history: PathBuf,
 }
@@ -181,7 +177,6 @@ pub(crate) struct Browser {
     pub(crate) web_context: WebContext,
     pub(crate) _toolbar_context: Option<WebContext>,
     pub(crate) proxy: EventLoopProxy<UserEvent>,
-    pub(crate) engine: Rc<RefCell<Option<adblock::Engine>>>,
     pub(crate) blocked: u64,
     pub(crate) extensions: Vec<ExtensionInfo>,
     pub(crate) extensions_loaded: bool,
@@ -1477,27 +1472,6 @@ impl Browser {
         self.sync_toolbar();
     }
 
-    pub(crate) fn toggle_site_adblock(&mut self) {
-        let Some(tab) = self.tabs.get(self.active) else {
-            return;
-        };
-        let Some(site) = settings::site_of(&tab.url) else {
-            return;
-        };
-        let list = &mut self.settings.privacy.adblock_allowlist;
-        if let Some(i) = list.iter().position(|s| *s == site) {
-            list.remove(i);
-        } else {
-            list.push(site);
-        }
-        *self.allowlist.borrow_mut() = list.clone();
-        self.save_settings();
-        self.refresh_start();
-        let _ = self.tabs[self.active].webview.reload();
-        self.sync_toolbar();
-        self.push_settings_state();
-    }
-
     pub(crate) fn save_settings(&self) {
         settings::save(&self.paths.root, &self.settings);
     }
@@ -1613,7 +1587,6 @@ fn main() -> anyhow::Result<()> {
         root: root.clone(),
         profile: root.join("profile"),
         extensions: root.join("extensions"),
-        adblock: root.join("adblock"),
         css: css_path,
         downloads_history: root.join("downloads.json"),
     };
@@ -1637,7 +1610,7 @@ fn main() -> anyhow::Result<()> {
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    ext_install::ensure_adguard_extension(&paths.extensions, proxy.clone());
+    ext_install::ensure_ublock_extension(&paths.extensions, proxy.clone());
 
     let proxy_css = proxy.clone();
     let _css_watcher = chickenwm_core::css::spawn_config_watcher(move |ev| {
@@ -1715,7 +1688,6 @@ fn main() -> anyhow::Result<()> {
         web_context,
         _toolbar_context: toolbar_context,
         proxy: proxy.clone(),
-        engine: Rc::new(RefCell::new(None)),
         blocked: 0,
         extensions: Vec::new(),
         extensions_loaded: extensions::all_installed(&paths.extensions, &paths.profile),
@@ -1770,7 +1742,6 @@ fn main() -> anyhow::Result<()> {
             break;
         }
     });
-    adblock_filter::spawn_engine_loader(browser.paths.adblock.clone(), proxy.clone());
     browser.refresh_start();
     if args.is_empty() {
         browser.restore_session();

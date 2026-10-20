@@ -72,26 +72,40 @@ pub fn install_input_async(input: String, ext_root: PathBuf, done: impl FnOnce(R
     });
 }
 
-pub(crate) const ADGUARD_EXTENSION_ID: &str = "bgnkhhnnamicmpeenaelnjfhikgbkllg";
+pub(crate) const UBLOCK_LITE_EXTENSION_ID: &str = "ddkjiahejlhfcafbddmgiahcphecmpfh";
 
-/// Auto-provisions the official AdGuard AdBlocker extension if not already present.
-pub(crate) fn ensure_adguard_extension(ext_root: &Path, proxy: tao::event_loop::EventLoopProxy<crate::UserEvent>) {
-    let adguard_dir = ext_root.join(ADGUARD_EXTENSION_ID);
-    if adguard_dir.exists() && adguard_dir.join("manifest.json").exists() {
+/// Auto-provisions the official uBlock Origin Lite extension if not already present,
+/// and wipes any legacy heavy adblockers.
+pub(crate) fn ensure_ublock_extension(ext_root: &Path, proxy: tao::event_loop::EventLoopProxy<crate::UserEvent>) {
+    // Wipe old AdGuard extension if present
+    let adguard_dir = ext_root.join("bgnkhhnnamicmpeenaelnjfhikgbkllg");
+    if adguard_dir.exists() {
+        let _ = std::fs::remove_dir_all(&adguard_dir);
+    }
+    // Wipe old adblock directory if present
+    if let Some(parent) = ext_root.parent() {
+        let adblock_dir = parent.join("adblock");
+        if adblock_dir.exists() {
+            let _ = std::fs::remove_dir_all(&adblock_dir);
+        }
+    }
+
+    let ublock_dir = ext_root.join(UBLOCK_LITE_EXTENSION_ID);
+    if ublock_dir.exists() && ublock_dir.join("manifest.json").exists() {
         return;
     }
     let ext_root = ext_root.to_path_buf();
     std::thread::spawn(move || {
-        tracing::info!("auto-installing AdGuard AdBlocker extension...");
-        match download_crx(ADGUARD_EXTENSION_ID, &ext_root) {
+        tracing::info!("auto-installing uBlock Origin Lite extension...");
+        match download_crx(UBLOCK_LITE_EXTENSION_ID, &ext_root) {
             Ok(bytes) => match install_bytes(&bytes, &ext_root) {
                 Ok(dest) => {
-                    tracing::info!("successfully installed AdGuard AdBlocker into {}", dest.display());
+                    tracing::info!("successfully installed uBlock Origin Lite into {}", dest.display());
                     let _ = proxy.send_event(crate::UserEvent::RefreshExtensions);
                 }
-                Err(e) => tracing::warn!("failed to unpack AdGuard AdBlocker: {e:#}"),
+                Err(e) => tracing::warn!("failed to unpack uBlock Origin Lite: {e:#}"),
             },
-            Err(e) => tracing::warn!("failed to download AdGuard AdBlocker: {e:#}"),
+            Err(e) => tracing::warn!("failed to download uBlock Origin Lite: {e:#}"),
         }
     });
 }
@@ -469,7 +483,7 @@ mod online {
     #[test]
     #[ignore]
     fn store_download() {
-        let id = "ghmbeldphafepmbegfdlkpapadhbakde";
+        let id = super::UBLOCK_LITE_EXTENSION_ID;
         let root = std::env::temp_dir().join("henbrowser-store-test");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();

@@ -863,7 +863,7 @@ impl Browser {
                 .filter(|t| !t.settings_page.get() && history::canonical(&t.url).is_some())
                 .map(|t| self.bookmarks.contains(&t.url)),
             "blocked": self.blocked,
-            "adblock": self.engine.borrow().is_some(),
+            "adblock": true,
             "extensions": self.extensions,
             "popup": self.popup.as_ref().map(|p| p.extension_id.as_str()),
         });
@@ -1491,7 +1491,7 @@ impl Browser {
                             tracing::error!("failed to launch updater: {e}");
                         }
                     }
-                    ToolbarCmd::ToggleSiteAdblock => self.toggle_site_adblock(),
+                    ToolbarCmd::ToggleSiteAdblock => self.toggle_extension_popup(crate::ext_install::UBLOCK_LITE_EXTENSION_ID.to_string()),
                     ToolbarCmd::ToggleSidebar => {
                         let mut a = self.settings.appearance.clone();
                         a.sidebar_collapsed = !a.sidebar_collapsed;
@@ -1625,17 +1625,6 @@ impl Browser {
                     if let Some(i) = self.tab_index(tab) {
                         self.apply_site_settings(i);
                         let tab_url = self.tabs[i].url.clone();
-                        if let Some(engine) = self.engine.borrow().as_ref() {
-                            if !self.allowlist.borrow().iter().any(|site| crate::settings::url_on_site(&tab_url, site)) {
-                                if let Some(css) = crate::adblock_filter::cosmetic_css_for_url(engine, &tab_url) {
-                                    let script = format!(
-                                        "(function(){{let el=document.getElementById('hen-cosmetic-filter');if(!el){{el=document.createElement('style');el.id='hen-cosmetic-filter';(document.head||document.documentElement).appendChild(el);}}el.textContent={};}})();",
-                                        serde_json::to_string(&css).unwrap_or_default()
-                                    );
-                                    let _ = self.tabs[i].webview.evaluate_script(&script);
-                                }
-                            }
-                        }
                         if tab_url.contains("youtube.com") {
                             let yt_script = r#"
                                 (function() {
@@ -1733,14 +1722,6 @@ impl Browser {
                     }
                 }
             },
-            UserEvent::AdblockReady(engine) => {
-                *self.engine.borrow_mut() = Some(*engine);
-                self.sync_toolbar();
-            }
-            UserEvent::Blocked => {
-                self.blocked += 1;
-                self.sync_toolbar();
-            }
             UserEvent::Extensions(list) => {
                 tracing::info!("extensions: {:?}", list.iter().map(|e| (&e.name, &e.id)).collect::<Vec<_>>());
                 self.extensions = list;

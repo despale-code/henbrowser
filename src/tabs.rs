@@ -12,7 +12,7 @@ use wry::WebViewExtWindows;
 use wry::{NewWindowResponse, PageLoadEvent, WebView};
 
 use crate::{
-    adblock_filter, downloads, install_audio_state, install_diagnostics, install_favicon, install_shortcuts, internal,
+    downloads, install_audio_state, install_diagnostics, install_favicon, install_shortcuts, internal,
     internal_mode_init, profile_builder, serve_internal, settings, show_settings_page,
     theme_init_script, Browser, UserEvent, HOME, PRIVATE_START_URL,
 };
@@ -382,16 +382,6 @@ impl Browser {
             }
         };
         let controller = webview.controller();
-        if let Err(e) = adblock_filter::install(
-            &controller,
-            self.engine.clone(),
-            self.allowlist.clone(),
-            page_url.clone(),
-            self.proxy.clone(),
-            id,
-        ) {
-            tracing::warn!("adblock hook failed for tab {id}: {e}");
-        }
         install_shortcuts(&controller, self.proxy.clone(), true);
         install_diagnostics(&controller, id);
         install_favicon(&controller, id, self.proxy.clone());

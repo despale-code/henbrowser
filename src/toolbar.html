@@ -1073,7 +1073,7 @@
       <button class="btn" id="reload" title="Reload (Ctrl+R)">&#x21bb;</button>
     </div>
     <div id="field">
-      <div id="shield" title="AdGuard AdBlocker">&#x25c8; <span id="blocked">0</span></div>
+      <div id="shield" title="uBlock Origin Lite">&#x25c8; <span id="blocked"></span></div>
       <input id="addr" spellcheck="false" placeholder="Search or enter website name">
       <button id="star" title="Bookmark this page (Ctrl+D)">&#x2606;</button>
       <div id="progress"></div>
@@ -1692,13 +1692,15 @@
       star.innerHTML = s.bookmarked ? "&#x2605;" : "&#x2606;";
       star.title = s.bookmarked ? "Remove bookmark (Ctrl+D)" : "Bookmark this page (Ctrl+D)";
       lastBlocked = s.blocked;
-      $("blocked").textContent = s.blocked;
-      const siteOff = s.site_adblock === false;
-      shield.classList.toggle("on", !!s.adblock && !siteOff);
-      shield.classList.toggle("off", siteOff);
-      shield.title = !s.adblock ? "AdGuard AdBlocker loading…"
-        : siteOff ? "AdGuard AdBlocker is OFF for this site — click to turn it back on"
-        : `AdGuard AdBlocker on — ${s.blocked} blocked. Click to turn it off for this site`;
+      if (s.blocked > 0) {
+        $("blocked").textContent = s.blocked;
+        $("blocked").style.display = "inline-block";
+      } else {
+        $("blocked").textContent = "";
+        $("blocked").style.display = "none";
+      }
+      shield.classList.toggle("on", !!s.adblock);
+      shield.title = "uBlock Origin Lite — click to open";
 
       // Extensions are listed in the menu now.
       $("menu-btn").classList.toggle("open", s.popup === "menu");
