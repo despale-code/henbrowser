@@ -1395,8 +1395,13 @@ impl Browser {
                     ToolbarCmd::ResizeWindow { edge } => {
                         let direction = match edge.as_str() {
                             "n" => ResizeDirection::North,
+                            "s" => ResizeDirection::South,
+                            "e" => ResizeDirection::East,
+                            "w" => ResizeDirection::West,
                             "nw" => ResizeDirection::NorthWest,
                             "ne" => ResizeDirection::NorthEast,
+                            "sw" => ResizeDirection::SouthWest,
+                            "se" => ResizeDirection::SouthEast,
                             _ => return true,
                         };
                         if !self.window.is_maximized() {

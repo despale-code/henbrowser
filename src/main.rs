@@ -69,7 +69,7 @@ pub(crate) const START_URL: &str = "http://hen.start/";
 /// The start page in a private tab: no most-visited sites or history on it.
 pub(crate) const PRIVATE_START_URL: &str = "http://hen.start/?private";
 /// The gradient border around the whole window (drawn by the toolbar view, behind everything).
-pub(crate) const WIN_BORDER: f64 = 3.0;
+pub(crate) const WIN_BORDER: f64 = 1.0;
 pub(crate) const HOME: &str = START_URL;
 pub(crate) const SEARCH: &str = "https://duckduckgo.com/?q=";
 
@@ -1565,6 +1565,7 @@ fn main() -> anyhow::Result<()> {
         .build(&event_loop)?;
 
     chickenwm_core::sys::apply_acrylic_raw(window.hwnd() as *mut _, None);
+    chickenwm_core::sys::enable_borderless_resizing_raw(window.hwnd() as *mut _);
 
     let mut web_context = WebContext::new(Some(paths.profile.clone()));
     let mut toolbar_context = (!browser_settings.memory.share_toolbar_process)

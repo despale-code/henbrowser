@@ -81,11 +81,16 @@
      which many tiling-WM setups turn off system-wide). */
   body.no-anim *, body.no-anim *::before, body.no-anim *::after { transition: none !important; animation: none !important; }
 
-  /* Top-edge invisible resize grips (for borderless window) */
-  .grip { position: fixed; z-index: 20; }
-  #grip-n  { top: 0; left: 10px; right: 10px; height: 4px; cursor: ns-resize; }
-  #grip-nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
-  #grip-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+  /* Window edge resize grips (for borderless window) */
+  .grip { position: fixed; z-index: 20000; }
+  #grip-n  { top: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+  #grip-s  { bottom: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+  #grip-w  { left: 0; top: 12px; bottom: 12px; width: 6px; cursor: ew-resize; }
+  #grip-e  { right: 0; top: 12px; bottom: 12px; width: 6px; cursor: ew-resize; }
+  #grip-nw { top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+  #grip-ne { top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+  #grip-sw { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+  #grip-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
 
   /* ── Row 1: toolbar ── */
   #row {
@@ -773,7 +778,7 @@
    * reload (top right), the address field, the tabs, and new tab / private tab / extensions /
    * menu / close along the bottom. The page sits to its right inside the window border.
    * ========================================================================= */
-  :root { --win-border: 3px; --amb1: var(--accent-color); --amb2: var(--accent-color); --amb3: var(--accent-color); }
+  :root { --win-border: 1px; --amb1: var(--accent-color); --amb2: var(--accent-color); --amb3: var(--accent-color); }
   #side {
     position: fixed;
     left: var(--win-border);
@@ -877,20 +882,17 @@
   #win-border {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: 10000;
     pointer-events: none;
     padding: var(--win-border);
-    background: conic-gradient(from var(--border-angle),
-      var(--accent-color), var(--amb1), var(--amb2), var(--accent-color), var(--amb3), var(--accent-color));
+    border-radius: var(--border-radius, 12px);
+    background: linear-gradient(to bottom, #2b2b2b, #1f1f1f);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
-    animation: border-turn 24s linear infinite;
     transition: opacity 600ms;
   }
   body.flyout #win-border { display: none; }
-  body.no-anim #win-border { animation: none; }
-  @keyframes border-turn { to { --border-angle: 360deg; } }
 
   /* Readable tabs: full text colour (titles of inactive tabs only a touch softer), and a sidebar
      solid enough that the ambient glow behind it doesn't wash them out. */
@@ -979,8 +981,13 @@
   </div>
   <div id="page-edge" aria-hidden="true"></div>
   <div class="grip" id="grip-n"></div>
+  <div class="grip" id="grip-s"></div>
+  <div class="grip" id="grip-w"></div>
+  <div class="grip" id="grip-e"></div>
   <div class="grip" id="grip-nw"></div>
   <div class="grip" id="grip-ne"></div>
+  <div class="grip" id="grip-sw"></div>
+  <div class="grip" id="grip-se"></div>
 
   <div id="win-border" aria-hidden="true"></div>
 
@@ -1158,10 +1165,13 @@
     });
   }
 
-  for (const edge of ["n", "nw", "ne"]) {
-    $("grip-" + edge).onmousedown = (e) => {
-      if (e.button === 0) { post({ cmd: "resize_window", edge }); e.preventDefault(); }
-    };
+  for (const edge of ["n", "s", "w", "e", "nw", "ne", "sw", "se"]) {
+    const el = $("grip-" + edge);
+    if (el) {
+      el.onmousedown = (e) => {
+        if (e.button === 0) { post({ cmd: "resize_window", edge }); e.preventDefault(); }
+      };
+    }
   }
 
   // Dragging empty chrome space moves the window; double-click toggles maximize.
