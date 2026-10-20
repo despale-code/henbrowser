@@ -145,17 +145,6 @@
   }
   .fx-ctl input[type="range"]:not(:disabled)::-webkit-slider-thumb:hover { transform: scale(1.15); }
   .fx-ctl input[type="range"]:not(:disabled):active::-webkit-slider-thumb { transform: scale(0.95); }
-  /* Procedural film grain overlay */
-  #fx-noise {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    pointer-events: none;
-    transition: opacity 160ms ease-out;
-    opacity: calc(var(--fx-noise, 0) * 0.85);
-    background-repeat: repeat;
-    background-size: 160px 160px;
-  }
   .site-chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; margin: 4px 6px 0 0;
     border: 1px solid var(--border-color); border-radius: 14px; font-size: 12px;
@@ -337,7 +326,6 @@
 </style>
 </head>
 <body>
-<div id="fx-noise" aria-hidden="true"></div>
 <div id="layout">
   <!-- Sidebar -->
   <div id="sidebar">
@@ -921,36 +909,6 @@
   // setting the other apps use.
   darkToggle.onchange = () => post({ cmd: "set_app_mode", mode: darkToggle.checked ? "dark" : "light" });
   followToggle.onchange = () => post({ cmd: "set_app_mode", mode: followToggle.checked ? "system" : (systemDark ? "dark" : "light") });
-  function initNoiseTexture() {
-    try {
-      const size = 160;
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext("2d");
-      const imgData = ctx.createImageData(size, size);
-      const data = imgData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const isLight = Math.random() > 0.5;
-        const v = isLight ? 255 : 0;
-        data[i] = v;
-        data[i + 1] = v;
-        data[i + 2] = v;
-        data[i + 3] = Math.floor(Math.random() * 45) + 15;
-      }
-      ctx.putImageData(imgData, 0, 0);
-      const url = canvas.toDataURL("image/png");
-      const el = document.getElementById("fx-noise");
-      if (el) el.style.backgroundImage = `url("${url}")`;
-    } catch (_) {}
-  }
-  initNoiseTexture();
-
-  function updateLiveFx() {
-    if (!appearance) return;
-    const n = appearance.noise ? (Number(appearance.noise_strength ?? 50) / 100) : 0;
-    document.documentElement.style.setProperty("--fx-noise", n);
-  }
 
   document.querySelectorAll("[data-ap]").forEach((el) => {
     el.onchange = () => {
@@ -961,7 +919,6 @@
         range.disabled = !el.checked;
         range.style.setProperty("--fill", range.value + "%");
       }
-      updateLiveFx();
       post({ cmd: "set_appearance", appearance });
     };
   });
@@ -974,7 +931,6 @@
       paint();
       if (!appearance) appearance = {};
       appearance[el.dataset.apRange] = Number(el.value);
-      updateLiveFx();
       clearTimeout(rangeTimer);
       rangeTimer = setTimeout(() => post({ cmd: "set_appearance", appearance }), 35);
     });
@@ -1025,7 +981,6 @@
           el.style.setProperty("--fill", el.value + "%");
           el.disabled = !appearance[el.dataset.apFor];
         });
-        updateLiveFx();
       }
       if (state.privacy) {
         privacy = state.privacy;

@@ -624,18 +624,18 @@
   @keyframes amb-c { to { transform: translate3d(-12vw, 8px, 0) scale(0.9, 1.15); } }
   @keyframes amb-d { to { transform: translate3d(30px, -12vh, 0) scale(1.1, 1.25); } }
 
-  /* Grain, like Zen: procedural film grain over the chrome surfaces. */
+  /* Grain, like Zen: procedural film grain over the sidebar only. */
   #fx-noise {
-    position: fixed;
+    position: absolute;
     inset: 0;
-    z-index: 90;
+    z-index: 10;
     pointer-events: none;
+    border-radius: inherit;
     transition: opacity 160ms var(--anim-smooth);
     opacity: calc(var(--fx-noise, 0) * 0.85);
     background-repeat: repeat;
     background-size: 160px 160px;
   }
-  body.flyout #fx-noise { display: block !important; }
 
   /* With effects on, the surfaces let them through. */
   body.fx #row { background: transparent; }
@@ -977,7 +977,6 @@
     <div id="fx-gradient"></div>
     <div id="fx-ambient"><div id="fx-wash"></div><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span></div>
   </div>
-  <div id="fx-noise" aria-hidden="true"></div>
   <div id="page-edge" aria-hidden="true"></div>
   <div class="grip" id="grip-n"></div>
   <div class="grip" id="grip-nw"></div>
@@ -990,6 +989,7 @@
   <!-- Everything lives in the sidebar: navigation on top, the address field, the tabs, and the
        window's controls along the bottom. -->
   <div id="side">
+    <div id="fx-noise" aria-hidden="true"></div>
     <div id="side-top">
       <button class="btn" id="back" title="Back (Alt+Left)">&#x2190;</button>
       <button class="btn" id="fwd" title="Forward (Alt+Right)">&#x2192;</button>
