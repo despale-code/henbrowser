@@ -217,10 +217,28 @@
   #star.on { color: var(--accent-secondary, var(--fg-color)); }
   #star[hidden] { display: none; }
 
-  #reload { transition: background-color var(--anim-duration), transform 420ms var(--anim-bezier); }
-  #reload:hover { transform: rotate(-90deg); }
-  #reload.loading { animation: spin 0.9s linear infinite; }
-  @keyframes spin { 100% { transform: rotate(360deg); } }
+  #reload {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #reload .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: center center;
+    transition: transform 420ms var(--anim-bezier);
+  }
+  #reload:hover:not(.loading) .icon {
+    transform: rotate(180deg);
+  }
+  #reload.loading .icon {
+    animation: reload-spin 0.85s linear infinite;
+  }
+  @keyframes reload-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 
   #progress {
     position: absolute;
@@ -1070,7 +1088,12 @@
       <button class="btn" id="back" title="Back (Alt+Left)">&#x2190;</button>
       <button class="btn" id="fwd" title="Forward (Alt+Right)">&#x2192;</button>
       <div class="spacer"></div>
-      <button class="btn" id="reload" title="Reload (Ctrl+R)">&#x21bb;</button>
+      <button class="btn" id="reload" title="Reload (Ctrl+R)">
+        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.99 6.57 2.57L21 8"/>
+          <polyline points="21 3 21 8 16 8"/>
+        </svg>
+      </button>
     </div>
     <div id="field">
       <div id="shield" title="uBlock Origin Lite">&#x25c8; <span id="blocked"></span></div>
