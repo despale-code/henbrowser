@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
+<title>Hen Browser</title>
 <style>
   /* =========================================================================
    * Hen Browser chrome: toolbar row, tab strip / vertical tab sidebar.
@@ -1113,6 +1114,7 @@
   const tabsEl = $("tabs"), addr = $("addr"), field = $("field"), indicator = $("indicator"), bmbarEl = $("bmbar");
   const flyout = !!window.__HEN_FLYOUT;
   if (flyout) document.body.classList.add("flyout");
+  document.title = "Hen Browser";
   let autohide = false;
   let currentUrl = "";
   let vertical = false;
@@ -1593,7 +1595,30 @@
 
   let lastBlocked = 0;
 
+  let pageAnimFrame = 0;
   window.hb = {
+    startPageAnim(dir) {
+      if (pageAnimFrame) {
+        cancelAnimationFrame(pageAnimFrame);
+        pageAnimFrame = 0;
+      }
+      const duration = 240;
+      const startTime = performance.now();
+      function step(now) {
+        const elapsed = now - startTime;
+        const p = Math.min(1, elapsed / duration);
+        // Fluid cubic ease out
+        const ease = 1 - Math.pow(1 - p, 3);
+        const done = p >= 1;
+        post({ cmd: "page_switch_anim", progress: ease, dir: dir, done: done });
+        if (!done) {
+          pageAnimFrame = requestAnimationFrame(step);
+        } else {
+          pageAnimFrame = 0;
+        }
+      }
+      pageAnimFrame = requestAnimationFrame(step);
+    },
     toggleSidebar: toggleSidebarAnimated,
     render(s) {
       const L = s.layout || {};

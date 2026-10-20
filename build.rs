@@ -43,6 +43,10 @@ fn main() {
     // OUT_DIR is target/<profile>/build/henbrowser-<hash>/out; the exe lives in target/<profile>.
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let profile_dir = out_dir.ancestors().nth(3).expect("unexpected OUT_DIR layout");
-    std::fs::copy(&dll, profile_dir.join("WebView2Loader.dll"))
-        .unwrap_or_else(|e| panic!("failed to copy {}: {e}", dll.display()));
+    let dest = profile_dir.join("WebView2Loader.dll");
+    if !dest.exists() {
+        std::fs::copy(&dll, &dest).unwrap_or_else(|e| panic!("failed to copy {}: {e}", dll.display()));
+    } else {
+        let _ = std::fs::copy(&dll, &dest);
+    }
 }

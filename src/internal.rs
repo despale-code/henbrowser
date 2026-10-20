@@ -118,7 +118,7 @@ const PAGE_CSS: &str = r#"
 fn page(title: &str, theme: &str, body: &str, refresh_secs: Option<u32>) -> String {
     let refresh = refresh_secs.map(|s| format!(r#"<meta http-equiv="refresh" content="{s}">"#)).unwrap_or_default();
     format!(
-        r#"<!doctype html><html><head><meta charset="utf-8">{refresh}<title>{t}</title>
+        r#"<!doctype html><html><head><meta charset="utf-8">{refresh}<title>{t} — Hen Browser</title>
 <style>:root{{--bg-color:#f0e6d3;--surface-color:#fffcf5;--fg-color:#2b1d14;--subtext-color:#6b5545;--border-color:rgba(59,42,31,.28);--hover-bg:rgba(59,42,31,.12);--accent-color:#3b2a1f}}</style>
 {theme}<style>{PAGE_CSS}</style></head><body><main>{body}</main></body></html>"#,
         t = html_escape(title)

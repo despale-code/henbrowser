@@ -315,6 +315,7 @@ impl Browser {
                     .body(std::borrow::Cow::Owned(html.into_bytes()))
                     .unwrap_or_default()
             })
+            .with_initialization_script("if (!document.title || document.title === 'about:blank') document.title = 'Hen Browser';")
             .with_initialization_script(theme_init_script(&self.user_css))
             .with_initialization_script(internal_mode_init(&self.mode_css))
             .with_initialization_script(
@@ -412,7 +413,7 @@ impl Browser {
         self.tabs.push(Tab {
             id,
             webview,
-            title: if is_settings { "Settings".to_owned() } else { String::new() },
+            title: if is_settings { "Settings".to_owned() } else { "Hen Browser".to_owned() },
             url: url.to_owned(),
             loading: !is_settings,
             page_url,
@@ -447,6 +448,7 @@ impl Browser {
     }
 
     pub(crate) fn switch_to(&mut self, index: usize) {
+        self.finish_page_switch_anim();
         if index >= self.tabs.len() {
             return;
         }

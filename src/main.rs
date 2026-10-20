@@ -153,6 +153,13 @@ pub(crate) enum Shortcut {
     ToggleMute,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PageSwitchAnim {
+    pub(crate) from_idx: usize,
+    pub(crate) to_idx: usize,
+    pub(crate) _dir: f64,
+}
+
 pub(crate) struct Paths {
     pub(crate) root: PathBuf,
     pub(crate) profile: PathBuf,
@@ -207,6 +214,7 @@ pub(crate) struct Browser {
     pub(crate) update_error: Option<String>,
     pub(crate) focus_mode: bool,
     pub(crate) anim_sidebar_w: Option<f64>,
+    pub(crate) page_switch_anim: Option<PageSwitchAnim>,
 }
 
 fn config_dir() -> PathBuf {
@@ -1744,6 +1752,7 @@ fn main() -> anyhow::Result<()> {
         update_error: None,
         focus_mode: false,
         anim_sidebar_w: None,
+        page_switch_anim: None,
     };
     browser.build_suggest();
     if browser.settings.updates.auto_check {

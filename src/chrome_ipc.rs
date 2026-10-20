@@ -14,6 +14,7 @@ use wry::WebViewExtWindows;
 use wry::{NewWindowResponse, Rect, WebView};
 
 use crate::settings::MemorySettings;
+use crate::PageSwitchAnim;
 use crate::{
     display_url, downloads, ext_install, extensions, history, install_shortcuts, internal, internal_mode_init,
     mode_apply_js, process_memory, profile_builder, resolve_input, settings, show_settings_page,
@@ -119,6 +120,7 @@ pub(crate) enum ToolbarCmd {
     SwitchToTab { id: u32 },
     DragWindow,
     ToggleMuteTab { id: u32 },
+    PageSwitchAnim { progress: f64, dir: f64, done: bool },
     ResizeWindow { edge: String },
     ToggleMaximize,
     CloseWindow,
@@ -176,20 +178,22 @@ impl Browser {
         }
     }
 
-    pub(crate) fn content_rect(&self) -> Rect {
-        let (w, h) = self.logical_size();
+    pub(crate) fn content_dims(&self) -> (f64, f64, f64, f64) {
+        let (win_w, win_h) = self.logical_size();
         if self.focus_mode {
-            return Rect {
-                position: LogicalPosition::new(0.0, 0.0).into(),
-                size: LogicalSize::new(w.max(1.0), h.max(1.0)).into(),
-            };
+            return (0.0, 0.0, win_w.max(1.0), win_h.max(1.0));
         }
         let left = self.sidebar_w();
         let top = self.top_chrome_h();
         let bottom = WIN_BORDER + if self.shelf_visible { SHELF_H } else { 0.0 };
+        (left, top, (win_w - left - WIN_BORDER).max(1.0), (win_h - top - bottom).max(1.0))
+    }
+
+    pub(crate) fn content_rect(&self) -> Rect {
+        let (left, top, w, h) = self.content_dims();
         Rect {
             position: LogicalPosition::new(left, top).into(),
-            size: LogicalSize::new((w - left - WIN_BORDER).max(1.0), (h - top - bottom).max(1.0)).into(),
+            size: LogicalSize::new(w, h).into(),
         }
     }
 
@@ -429,7 +433,7 @@ impl Browser {
         let proxy = self.proxy.clone();
         let rect = self.flyout_strip_rect();
         let built = profile_builder(&mut self.web_context, &self.settings.memory)
-            .with_initialization_script("window.__HEN_FLYOUT = true;")
+            .with_initialization_script("window.__HEN_FLYOUT = true; document.title = 'Hen Browser';")
             .with_html(include_str!("toolbar.html"))
             .with_transparent(true)
             .with_background_color((0, 0, 0, 0))
@@ -634,6 +638,107 @@ impl Browser {
             }
             tab.muted = new_muted;
             self.sync_toolbar();
+        }
+    }
+
+    pub(crate) fn switch_to_animated(&mut self, to_idx: usize, dir: f64) {
+        if self.tabs.len() <= 1 || to_idx >= self.tabs.len() {
+            return;
+        }
+        if !self.settings.appearance.animations {
+            self.switch_to(to_idx);
+            return;
+        }
+
+        self.finish_page_switch_anim();
+
+        let from_idx = self.active;
+        if from_idx == to_idx {
+            return;
+        }
+
+        let (left, top, w, h) = self.content_dims();
+
+        if let Some(tab) = self.tabs.get_mut(to_idx) {
+            tab.hidden_since = None;
+            let _ = tab.webview.set_memory_usage_level(MemoryUsageLevel::Normal);
+            if std::mem::take(&mut tab.suspended) {
+                if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
+                    if let Ok(c3) = core.cast::<ICoreWebView2_3>() {
+                        let _ = unsafe { c3.Resume() };
+                    }
+                }
+            }
+        }
+
+        let in_initial_y = if dir > 0.0 { top + h } else { top - h };
+
+        if let Some(to_tab) = self.tabs.get(to_idx) {
+            let _ = to_tab.webview.set_bounds(Rect {
+                position: LogicalPosition::new(left, in_initial_y).into(),
+                size: LogicalSize::new(w, h).into(),
+            });
+            let _ = to_tab.webview.set_visible(true);
+        }
+
+        if let Some(from_tab) = self.tabs.get(from_idx) {
+            let _ = from_tab.webview.set_bounds(Rect {
+                position: LogicalPosition::new(left, top).into(),
+                size: LogicalSize::new(w, h).into(),
+            });
+            let _ = from_tab.webview.set_visible(true);
+        }
+
+        self.page_switch_anim = Some(PageSwitchAnim { from_idx, to_idx, _dir: dir });
+        self.active = to_idx;
+        self.sync_toolbar();
+        self.refresh_chrome_theme();
+        self.measure_tone();
+
+        let _ = self.toolbar.evaluate_script(&format!("window.hb && hb.startPageAnim && hb.startPageAnim({dir});"));
+    }
+
+    pub(crate) fn handle_page_switch_anim(&mut self, progress: f64, dir: f64, done: bool) {
+        if done {
+            self.finish_page_switch_anim();
+            return;
+        }
+
+        let Some(anim) = self.page_switch_anim else { return };
+        let (left, top, w, h) = self.content_dims();
+
+        let (out_y, in_y) = if dir > 0.0 {
+            (top - progress * h, top + (1.0 - progress) * h)
+        } else {
+            (top + progress * h, top - (1.0 - progress) * h)
+        };
+
+        if let Some(from_tab) = self.tabs.get(anim.from_idx) {
+            let _ = from_tab.webview.set_bounds(Rect {
+                position: LogicalPosition::new(left, out_y).into(),
+                size: LogicalSize::new(w, h).into(),
+            });
+        }
+
+        if let Some(to_tab) = self.tabs.get(anim.to_idx) {
+            let _ = to_tab.webview.set_bounds(Rect {
+                position: LogicalPosition::new(left, in_y).into(),
+                size: LogicalSize::new(w, h).into(),
+            });
+        }
+    }
+
+    pub(crate) fn finish_page_switch_anim(&mut self) {
+        if let Some(anim) = self.page_switch_anim.take() {
+            if anim.from_idx < self.tabs.len() && anim.from_idx != anim.to_idx {
+                self.send_to_background(anim.from_idx);
+            }
+            if anim.to_idx < self.tabs.len() {
+                let content = self.content_rect();
+                let _ = self.tabs[anim.to_idx].webview.set_bounds(content);
+                let _ = self.tabs[anim.to_idx].webview.set_visible(true);
+                let _ = self.tabs[anim.to_idx].webview.focus();
+            }
         }
     }
 
@@ -1178,6 +1283,9 @@ impl Browser {
                     ToolbarCmd::ToggleMuteTab { id } => {
                         self.toggle_mute_tab(id);
                     }
+                    ToolbarCmd::PageSwitchAnim { progress, dir, done } => {
+                        self.handle_page_switch_anim(progress, dir, done);
+                    }
                     ToolbarCmd::Navigate { input } => {
                         self.hide_suggestions();
                         let url = resolve_input(&input, &self.settings.search_engine);
@@ -1582,8 +1690,8 @@ impl Browser {
                     let _ = self.toolbar.focus();
                     let _ = self.toolbar.evaluate_script("hb.focusAddress()");
                 }
-                Shortcut::NextTab => self.switch_to((self.active + 1) % self.tabs.len()),
-                Shortcut::PrevTab => self.switch_to((self.active + self.tabs.len() - 1) % self.tabs.len()),
+                Shortcut::NextTab => self.switch_to_animated((self.active + 1) % self.tabs.len(), 1.0),
+                Shortcut::PrevTab => self.switch_to_animated((self.active + self.tabs.len() - 1) % self.tabs.len(), -1.0),
                 Shortcut::Reload => return self.handle(UserEvent::Ipc(r#"{"cmd":"reload"}"#.into())),
                 Shortcut::Back => return self.handle(UserEvent::Ipc(r#"{"cmd":"back"}"#.into())),
                 Shortcut::Forward => return self.handle(UserEvent::Ipc(r#"{"cmd":"forward"}"#.into())),
