@@ -1161,6 +1161,20 @@
   document.addEventListener("click", closeNewTabPop);
   addEventListener("keydown", (e) => { if (e.key === "Escape") closeNewTabPop(); });
   addEventListener("blur", closeNewTabPop);
+  newTabPop.addEventListener("mouseleave", closeNewTabPop);
+
+  const closeMenuIfOpen = () => {
+    const mb = $("menu-btn");
+    if (mb && mb.classList.contains("open")) {
+      post({ cmd: "close_popup" });
+    }
+  };
+  const tabsEl = $("tabs");
+  if (tabsEl) tabsEl.addEventListener("mouseenter", closeMenuIfOpen);
+  const sideTopEl = $("side-top");
+  if (sideTopEl) sideTopEl.addEventListener("mouseenter", closeMenuIfOpen);
+  const sideToggleEl = $("sidebar-toggle");
+  if (sideToggleEl) sideToggleEl.addEventListener("mouseenter", closeMenuIfOpen);
 
   // Sidebar width: drag its right edge. The page area follows live; the width is saved on release.
   const resizer = $("side-resize");

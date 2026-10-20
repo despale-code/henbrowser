@@ -47,6 +47,7 @@ pub(crate) enum ToolbarCmd {
     ExtPopup { id: String },
     FocusPage,
     ToggleMenu,
+    ClosePopup,
     OpenSettings,
     OpenSettingsAbout,
     OpenBookmarks,
@@ -878,7 +879,8 @@ impl Browser {
     }
 
     pub(crate) fn close_popup(&mut self) {
-        if self.popup.take().is_some() {
+        if let Some(popup) = self.popup.take() {
+            self.popup_closed = Some((popup.extension_id, Instant::now()));
             self.sync_toolbar();
         }
     }
@@ -1349,6 +1351,7 @@ impl Browser {
                         }
                     }
                     ToolbarCmd::ToggleMenu => self.toggle_menu(),
+                    ToolbarCmd::ClosePopup => self.close_popup(),
                     ToolbarCmd::OpenSettings => {
                         self.close_popup();
                         self.open_tab("about:settings");

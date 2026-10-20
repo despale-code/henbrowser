@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
+<title>Hen Browser</title>
 <style>
   :root {
     --bg-color: #f0e6d3;
@@ -45,6 +46,11 @@
     animation: menu-in 240ms cubic-bezier(0.05, 0.9, 0.1, 1.05) both;
   }
   @keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.97); } }
+  .menu-container.closing {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+    transition: opacity 100ms ease, transform 100ms ease;
+  }
   .menu-container > .item { animation: item-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
   .menu-container > .item:nth-child(n) { animation-delay: calc(var(--i, 0) * 14ms); }
   @keyframes item-in { from { opacity: 0; transform: translateX(6px); } }
@@ -316,6 +322,47 @@
   window.setZoom = (z) => {
     document.getElementById("zoom-level").textContent = Math.round(z * 100) + "%";
   };
+
+  // Hovering off of the menu: smoothly disappear after slight debounce.
+  let closeTimer = null;
+  const scheduleClose = () => {
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => {
+      const container = document.querySelector(".menu-container");
+      if (container) {
+        container.classList.add("closing");
+      }
+      setTimeout(() => {
+        post({ cmd: "close_popup" });
+      }, 90);
+    }, 120);
+  };
+
+  const cancelClose = () => {
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+    const container = document.querySelector(".menu-container");
+    if (container) {
+      container.classList.remove("closing");
+    }
+  };
+
+  document.documentElement.addEventListener("mouseleave", scheduleClose);
+  document.documentElement.addEventListener("mouseenter", cancelClose);
+  window.addEventListener("mouseout", (e) => {
+    if (!e.relatedTarget && !e.toElement) {
+      scheduleClose();
+    }
+  });
+  window.addEventListener("mouseover", cancelClose);
+
+  addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      post({ cmd: "close_popup" });
+    }
+  });
 </script>
 </body>
 </html>
