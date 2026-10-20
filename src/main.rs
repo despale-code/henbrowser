@@ -261,7 +261,12 @@ pub(crate) fn internal_mode_init(css: &str) -> String {
     )
 }
 
-pub(crate) fn chrome_bg(css: &str) -> (u8, u8, u8, u8) {
+pub(crate) fn chrome_bg(_css: &str) -> (u8, u8, u8, u8) {
+    (0, 0, 0, 0)
+}
+
+#[allow(dead_code)]
+fn _old_chrome_bg(css: &str) -> (u8, u8, u8, u8) {
     let hex = css
         .lines()
         .find_map(|l| l.split_once("--bg-color:"))

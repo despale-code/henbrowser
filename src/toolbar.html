@@ -59,7 +59,7 @@
   html, body {
     height: 100%;
     overflow: hidden;
-    background: var(--bg-color);
+    background: transparent;
     color: var(--fg-color);
     font-family: var(--font-family);
     font-size: var(--font-size);
@@ -789,11 +789,11 @@
     flex-direction: column;
     gap: 6px;
     padding: 6px 6px 4px;
-    background: var(--sidebar-bg);
+    background: color-mix(in srgb, var(--sidebar-bg) 10%, transparent);
     z-index: 5;
     transition: width 320ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth);
   }
-  body.fx #side { background: color-mix(in srgb, var(--sidebar-bg) 40%, transparent); }
+  body.fx #side { background: color-mix(in srgb, var(--sidebar-bg) 10%, transparent); }
   #side-top, #side-bottom { flex: none; display: flex; align-items: center; gap: 2px; }
   #side-top { height: 34px; }
   #side-bottom { height: 34px; }
@@ -900,7 +900,7 @@
   #side .tab:not(.active) .title { opacity: 0.88; }
   #side .tab.private { color: var(--fg-color); }
   #side .tab.private .title { opacity: 0.72; }
-  body.fx #side { background: color-mix(in srgb, var(--sidebar-bg) 82%, transparent); }
+  body.fx #side { background: color-mix(in srgb, var(--sidebar-bg) 10%, transparent); }
 
   /* Collapse / expand: the chevron turns, not the whole button. */
   body.vertical.collapsed #sidebar-toggle, #sidebar-toggle { transform: none; }
