@@ -1,8 +1,8 @@
-//! Built-in network ad/tracker blocking.
+//! Built-in network AdGuard ad/tracker blocking.
 //!
-//! EasyList + EasyPrivacy are downloaded into `~/.config/chickenwm/henbrowser/adblock/` (refreshed
-//! every few days), compiled into Brave's `adblock` engine on a background thread, and consulted
-//! for every sub-resource request a tab makes via WebView2's `WebResourceRequested` event.
+//! Official AdGuard AdBlocker filter lists are downloaded into `~/.config/chickenwm/henbrowser/adblock/`
+//! (refreshed periodically), compiled into the adblock engine on a background thread, and consulted
+//! for sub-resource and iframe requests a tab makes via WebView2's `WebResourceRequested` event.
 //! Top-level page loads are never blocked, so a false positive can't leave you on an error page.
 
 use crate::UserEvent;
@@ -19,15 +19,14 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{take_pwstr, WebResourceRequestedEventHandler};
 use windows_core::{Interface, HSTRING, PWSTR};
 
-const LISTS: [(&str, &str); 8] = [
-    ("easylist.txt", "https://easylist.to/easylist/easylist.txt"),
-    ("easyprivacy.txt", "https://easylist.to/easylist/easyprivacy.txt"),
-    ("ublock-filters.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"),
-    ("ublock-badware.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt"),
-    ("ublock-privacy.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt"),
-    ("ublock-quick-fixes.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/quick-fixes.txt"),
-    ("ublock-unbreak.txt", "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt"),
-    ("peter-lowe.txt", "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext"),
+const LISTS: [(&str, &str); 7] = [
+    ("adguard-base.txt", "https://filters.adtidy.org/extension/chromium/filters/2.txt"),
+    ("adguard-tracking.txt", "https://filters.adtidy.org/extension/chromium/filters/3.txt"),
+    ("adguard-annoyances.txt", "https://filters.adtidy.org/extension/chromium/filters/14.txt"),
+    ("adguard-url-tracking.txt", "https://filters.adtidy.org/extension/chromium/filters/17.txt"),
+    ("adguard-social.txt", "https://filters.adtidy.org/extension/chromium/filters/4.txt"),
+    ("adguard-mobile.txt", "https://filters.adtidy.org/extension/chromium/filters/11.txt"),
+    ("adguard-dns.txt", "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"),
 ];
 const REFRESH_AFTER: Duration = Duration::from_secs(4 * 24 * 60 * 60);
 
@@ -89,11 +88,11 @@ pub fn spawn_engine_loader(dir: PathBuf, proxy: EventLoopProxy<UserEvent>) {
             }
         }
         if lists == 0 {
-            tracing::warn!("adblock: no filter lists available; blocking disabled");
+            tracing::warn!("adguard: no filter lists available; blocking disabled");
             return;
         }
         let engine = Engine::new_with_filter_set(set);
-        tracing::info!("adblock: engine ready ({lists} lists)");
+        tracing::info!("adguard: engine ready ({lists} lists)");
         let _ = proxy.send_event(UserEvent::AdblockReady(Box::new(engine)));
     });
 }
@@ -150,9 +149,6 @@ pub fn install(
                 };
                 let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT::default();
                 args.ResourceContext(&mut context)?;
-                if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT {
-                    return Ok(());
-                }
                 let uri = {
                     let mut uri = PWSTR::null();
                     args.Request()?.Uri(&mut uri)?;
@@ -165,18 +161,33 @@ pub fn install(
                 if allowlist.borrow().iter().any(|site| crate::settings::url_on_site(&source, site)) {
                     return Ok(());
                 }
-                let Ok(request) = Request::new(&uri, &source, request_type(context), "GET") else {
+
+                // If this is a document context:
+                // - If URI matches the main page URL, it's the top-level document: don't block.
+                // - If URI does NOT match the main page URL, it's an iframe (subdocument): block if ad!
+                let req_type = if context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT {
+                    let clean_uri = uri.split(['?', '#']).next().unwrap_or(&uri).trim_end_matches('/');
+                    let clean_source = source.split(['?', '#']).next().unwrap_or(&source).trim_end_matches('/');
+                    if clean_uri == clean_source {
+                        return Ok(());
+                    }
+                    "subdocument"
+                } else {
+                    request_type(context)
+                };
+
+                let Ok(request) = Request::new(&uri, &source, req_type, "GET") else {
                     return Ok(());
                 };
                 if engine.check_network_request(&request).should_block() {
                     let response = env.CreateWebResourceResponse(
                         None,
                         403,
-                        &HSTRING::from("Blocked by Hen Browser"),
+                        &HSTRING::from("Blocked by AdGuard AdBlocker"),
                         &HSTRING::new(),
                     )?;
                     args.SetResponse(&response)?;
-                    tracing::debug!("blocked {} request {uri} (page {source})", request_type(context));
+                    tracing::debug!("blocked {} request {uri} (page {source})", req_type);
                     let _ = proxy.send_event(UserEvent::Blocked);
                 }
                 Ok(())

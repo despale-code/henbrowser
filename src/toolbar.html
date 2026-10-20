@@ -1038,7 +1038,7 @@
       <button class="btn" id="reload" title="Reload (Ctrl+R)">&#x21bb;</button>
     </div>
     <div id="field">
-      <div id="shield" title="Ad &amp; tracker blocking">&#x25c8; <span id="blocked">0</span></div>
+      <div id="shield" title="AdGuard AdBlocker">&#x25c8; <span id="blocked">0</span></div>
       <input id="addr" spellcheck="false" placeholder="Search or enter website name">
       <button id="star" title="Bookmark this page (Ctrl+D)">&#x2606;</button>
       <div id="progress"></div>
@@ -1612,9 +1612,9 @@
       const siteOff = s.site_adblock === false;
       shield.classList.toggle("on", !!s.adblock && !siteOff);
       shield.classList.toggle("off", siteOff);
-      shield.title = !s.adblock ? "Ad blocking loading…"
-        : siteOff ? "Ad blocking is OFF for this site — click to turn it back on"
-        : `Ad & tracker blocking on — ${s.blocked} blocked. Click to turn it off for this site`;
+      shield.title = !s.adblock ? "AdGuard AdBlocker loading…"
+        : siteOff ? "AdGuard AdBlocker is OFF for this site — click to turn it back on"
+        : `AdGuard AdBlocker on — ${s.blocked} blocked. Click to turn it off for this site`;
 
       // Extensions are listed in the menu now.
       $("menu-btn").classList.toggle("open", s.popup === "menu");

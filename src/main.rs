@@ -1553,6 +1553,7 @@ fn main() -> anyhow::Result<()> {
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    ext_install::ensure_adguard_extension(&paths.extensions, proxy.clone());
 
     let proxy_css = proxy.clone();
     let _css_watcher = chickenwm_core::css::spawn_config_watcher(move |ev| {

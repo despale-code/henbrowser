@@ -72,8 +72,32 @@ pub fn install_input_async(input: String, ext_root: PathBuf, done: impl FnOnce(R
     });
 }
 
+pub(crate) const ADGUARD_EXTENSION_ID: &str = "bgnkhhnnamicmpeenaelnjfhikgbkllg";
+
+/// Auto-provisions the official AdGuard AdBlocker extension if not already present.
+pub(crate) fn ensure_adguard_extension(ext_root: &Path, proxy: tao::event_loop::EventLoopProxy<crate::UserEvent>) {
+    let adguard_dir = ext_root.join(ADGUARD_EXTENSION_ID);
+    if adguard_dir.exists() && adguard_dir.join("manifest.json").exists() {
+        return;
+    }
+    let ext_root = ext_root.to_path_buf();
+    std::thread::spawn(move || {
+        tracing::info!("auto-installing AdGuard AdBlocker extension...");
+        match download_crx(ADGUARD_EXTENSION_ID, &ext_root) {
+            Ok(bytes) => match install_bytes(&bytes, &ext_root) {
+                Ok(dest) => {
+                    tracing::info!("successfully installed AdGuard AdBlocker into {}", dest.display());
+                    let _ = proxy.send_event(crate::UserEvent::RefreshExtensions);
+                }
+                Err(e) => tracing::warn!("failed to unpack AdGuard AdBlocker: {e:#}"),
+            },
+            Err(e) => tracing::warn!("failed to download AdGuard AdBlocker: {e:#}"),
+        }
+    });
+}
+
 /// Fetches the store's `.crx` for `id` (WinINet follows the redirect to the package).
-fn download_crx(id: &str, ext_root: &Path) -> Result<Vec<u8>> {
+pub(crate) fn download_crx(id: &str, ext_root: &Path) -> Result<Vec<u8>> {
     use windows::core::HSTRING;
     use windows::Win32::System::Com::Urlmon::URLDownloadToFileW;
     let tmp = ext_root.join(format!(".download-{id}.crx"));
