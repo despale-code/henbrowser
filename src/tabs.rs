@@ -48,7 +48,7 @@ pub(crate) struct Tab {
 }
 
 impl Browser {
-    /// Writes the open tabs (and which one is active) when they differ from the last write.
+    /// Writes the open tabs (with titles and cached favicons) when they differ from the last write.
     pub(crate) fn save_session(&mut self) {
         if self.tabs.is_empty() {
             return;
@@ -67,43 +67,77 @@ impl Browser {
             }
             t.url.clone()
         };
-        let all: Vec<String> = self.tabs.iter().map(live).collect();
-        let kept: Vec<(&str, u8, bool)> = all
-            .iter()
-            .zip(&self.tabs)
-            .filter(|(_, t)| !t.private)
-            .map(|(u, t)| (u.as_str(), t.group, t.pinned))
-            .filter(|(u, _, _)| !u.is_empty() && *u != "about:blank")
-            .collect();
-        let urls: Vec<&str> = kept.iter().map(|k| k.0).collect();
-        let groups: Vec<u8> = kept.iter().map(|k| k.1).collect();
-        let pinned: Vec<bool> = kept.iter().map(|k| k.2).collect();
-        let active_url = all.get(self.active).map(String::as_str).unwrap_or("");
-        let active = urls.iter().position(|u| *u == active_url).unwrap_or(0);
+
+        let mut saved_tabs = Vec::new();
+        let mut active_idx = 0;
+        let mut cur = 0;
+
+        for (i, t) in self.tabs.iter().enumerate() {
+            if t.private {
+                continue;
+            }
+            let u = live(t);
+            if u.is_empty() || u == "about:blank" {
+                continue;
+            }
+            if i == self.active {
+                active_idx = cur;
+            }
+            saved_tabs.push(json!({
+                "url": u,
+                "title": t.title,
+                "icon": t.favicon,
+                "group": t.group,
+                "pinned": t.pinned,
+            }));
+            cur += 1;
+        }
+
+        let urls: Vec<&str> = saved_tabs.iter().map(|s| s["url"].as_str().unwrap_or("")).collect();
+        let groups: Vec<u8> = saved_tabs.iter().map(|s| s["group"].as_u64().unwrap_or(0) as u8).collect();
+        let pinned: Vec<bool> = saved_tabs.iter().map(|s| s["pinned"].as_bool().unwrap_or(false)).collect();
+
         let json = json!({
-            "active": active,
+            "active": active_idx,
+            "tabs": saved_tabs,
             "urls": urls,
             "groups": groups,
             "pinned": pinned
         })
         .to_string();
+
         if json != self.session_saved && std::fs::write(&self.session_path, &json).is_ok() {
             self.session_saved = json;
         }
     }
 
-    /// Reopens the tabs from the previous run.
+    /// Reopens the tabs from the previous run, reloading pages and caching their icons and titles.
     pub(crate) fn restore_session(&mut self) {
         #[derive(Deserialize)]
+        struct SavedTab {
+            url: String,
+            #[serde(default)]
+            title: String,
+            #[serde(default)]
+            icon: String,
+            #[serde(default)]
+            group: u8,
+            #[serde(default)]
+            pinned: bool,
+        }
+        #[derive(Deserialize)]
         struct Session {
+            #[serde(default)]
             active: usize,
+            #[serde(default)]
+            tabs: Vec<SavedTab>,
+            #[serde(default)]
             urls: Vec<String>,
             #[serde(default)]
             groups: Vec<u8>,
             #[serde(default)]
             pinned: Vec<bool>,
         }
-        // Sessions saved before internal pages moved from `chicken.` to `hen.`.
         let Some(s) = std::fs::read_to_string(&self.session_path)
             .ok()
             .map(|t| t.replace("http://chicken.", "http://hen."))
@@ -111,20 +145,41 @@ impl Browser {
         else {
             return;
         };
-        let active = s.active.min(s.urls.len().saturating_sub(1));
-        for (i, url) in s.urls.iter().enumerate() {
-            if i == active || url == "about:settings" {
-                self.open_tab(url);
-            } else {
-                self.open_tab_in("about:blank", true);
-                if let Some(tab) = self.tabs.last_mut() {
-                    tab.url = url.clone();
-                    tab.discarded = true;
-                }
-            }
+
+        let items: Vec<SavedTab> = if !s.tabs.is_empty() {
+            s.tabs
+        } else {
+            s.urls
+                .into_iter()
+                .enumerate()
+                .map(|(i, url)| SavedTab {
+                    url,
+                    title: String::new(),
+                    icon: String::new(),
+                    group: s.groups.get(i).copied().unwrap_or(0),
+                    pinned: s.pinned.get(i).copied().unwrap_or(false),
+                })
+                .collect()
+        };
+
+        if items.is_empty() {
+            return;
+        }
+
+        let active = s.active.min(items.len().saturating_sub(1));
+        for (i, item) in items.into_iter().enumerate() {
+            let is_active = i == active;
+            // Reload all pages properly, background ones in background
+            self.open_tab_with(&item.url, !is_active, false);
             if let Some(tab) = self.tabs.last_mut() {
-                tab.group = s.groups.get(i).copied().unwrap_or(0).min(6);
-                tab.pinned = s.pinned.get(i).copied().unwrap_or(false);
+                if !item.title.is_empty() {
+                    tab.title = item.title;
+                }
+                if !item.icon.is_empty() {
+                    tab.favicon = item.icon;
+                }
+                tab.group = item.group.min(6);
+                tab.pinned = item.pinned;
             }
         }
         if !self.tabs.is_empty() {

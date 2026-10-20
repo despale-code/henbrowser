@@ -487,17 +487,9 @@
   #sidebar-toggle:hover { background: var(--hover-bg); color: var(--fg-color); }
   body.vertical.collapsed #sidebar-toggle { transform: rotate(180deg); }
 
-  /* ── Auto-hide: collapsed mode strip; hovering or ALT+S slides/opens full sidebar ── */
-  body.vertical.autohide #tabs {
-    width: var(--sidebar-collapsed-w);
-  }
-  body.vertical.autohide #tabs .tab .title,
-  body.vertical.autohide #tabs .tab .close {
-    display: none;
-  }
-  body.vertical.autohide #tabs .tab {
-    padding: 0;
-    justify-content: center;
+  /* ── Auto-hide: hide sidebar completely when resting, replaced by 8px activation strip ── */
+  body.vertical.autohide:not(.flyout) #tabs {
+    display: none !important;
   }
 
   /* ── Flyout (the sliding panel itself, a separate webview over the page) ── */
@@ -809,49 +801,33 @@
   body.collapsed #side #field, body.collapsed #side #exts, body.collapsed #side .spacer { display: none; }
   body.collapsed #side-top, body.collapsed #side-bottom { flex-direction: column; height: auto; }
 
-  /* Auto-hide: thin hover trigger strip along the left window edge */
+  /* Auto-hide: hide collapsed sidebar completely in autohide mode */
+  body.autohide:not(.flyout) #side {
+    display: none !important;
+  }
+
+  /* 8-pixel wide activation bar along the left window edge */
   #flyout-strip { display: none; }
-  body.flyout #flyout-strip {
+  body.autohide:not(.flyout) #flyout-strip {
     display: block;
     position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 16px;
+    left: var(--win-border, 3px);
+    top: var(--win-border, 3px);
+    bottom: var(--win-border, 3px);
+    width: 8px;
     z-index: 99;
     cursor: pointer;
-    background: transparent;
-    transition: background 160ms var(--anim-smooth);
+    background: color-mix(in srgb, var(--border-color) 40%, transparent);
+    border-radius: 4px;
+    opacity: 0.55;
+    transition: background 150ms var(--anim-smooth), box-shadow 150ms var(--anim-smooth), opacity 150ms ease;
   }
-  body.flyout:not(.open) #flyout-strip:hover {
-    background: color-mix(in srgb, var(--accent-color) 45%, transparent);
+  body.autohide:not(.flyout) #flyout-strip:hover {
+    opacity: 1;
+    background: var(--accent-color);
+    box-shadow: 0 0 10px var(--accent-color);
   }
-  body.flyout.open #flyout-strip { display: none; }
-
-  body.autohide:not(.flyout) #side {
-    width: var(--sidebar-collapsed-w);
-  }
-  body.autohide:not(.flyout) #side #field,
-  body.autohide:not(.flyout) #side #exts,
-  body.autohide:not(.flyout) #side .spacer {
-    display: none;
-  }
-  body.autohide:not(.flyout) #side-top,
-  body.autohide:not(.flyout) #side-bottom {
-    flex-direction: column;
-    height: auto;
-  }
-  body.autohide:not(.flyout) #side .tab .title,
-  body.autohide:not(.flyout) #side .tab .close {
-    display: none;
-  }
-  body.autohide:not(.flyout) #side .tab {
-    padding: 0;
-    justify-content: center;
-  }
-  body.autohide:not(.flyout) #sidebar-toggle .chev {
-    transform: scaleX(-1);
-  }
+  body.flyout #flyout-strip { display: none !important; }
 
   /* ── Focus Mode (Alt+Z): hides all chrome, website is fullscreen ── */
   body.focus-mode #side,
@@ -1226,22 +1202,18 @@
   $("sidebar-toggle").onclick = () => toggleSidebarAnimated();
   $("pin").onclick = () => post({ cmd: "toggle_sidebar_autohide" });
 
-  // Auto-hide: hovering the strip opens the panel (fast sensitive response).
+  // Auto-hide: hovering the 8px strip opens the panel (fast sensitive response).
   let peekTimer = null;
   const triggerPeek = () => {
-    if (!autohide || !vertical) return;
+    if (!autohide || flyout) return;
+    clearTimeout(peekTimer);
     peekTimer = setTimeout(() => post({ cmd: "sidebar_peek", show: true }), 30);
   };
-  $("side").addEventListener("mouseenter", () => {
-    if (flyout || !autohide || !vertical) return;
-    triggerPeek();
-  });
-  $("side").addEventListener("mouseleave", () => { clearTimeout(peekTimer); });
   const stripEl = $("flyout-strip");
   if (stripEl) {
-    stripEl.addEventListener("mouseenter", () => {
-      post({ cmd: "sidebar_peek", show: true });
-    });
+    stripEl.addEventListener("mouseenter", triggerPeek);
+    stripEl.addEventListener("click", () => post({ cmd: "sidebar_peek", show: true }));
+    stripEl.addEventListener("mouseleave", () => clearTimeout(peekTimer));
   }
   // Flyout: slide back in when the pointer leaves the panel.
   let closeTimer = null;

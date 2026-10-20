@@ -142,10 +142,15 @@ impl Browser {
         let a = &self.settings.appearance;
         let (win_w, _) = self.logical_size();
 
+        // In autohide mode, the collapsed sidebar is hidden, replaced by an 8px activation strip.
+        if a.sidebar_autohide {
+            return WIN_BORDER + SIDEBAR_STRIP_W;
+        }
+
         // At small window sizes (< 560px), auto-collapse the sidebar to 56px icon strip
         // so the website viewport doesn't get squeezed into an unusable column.
         let auto_collapsed = win_w < 560.0;
-        let is_collapsed = a.sidebar_collapsed || a.sidebar_autohide || auto_collapsed;
+        let is_collapsed = a.sidebar_collapsed || auto_collapsed;
 
         WIN_BORDER
             + if is_collapsed {
@@ -699,7 +704,7 @@ impl Browser {
             "layout": {
                 "vertical": self.settings.appearance.vertical_tabs,
                 "autohide": self.settings.appearance.sidebar_autohide,
-                "collapsed": self.settings.appearance.sidebar_collapsed || self.settings.appearance.sidebar_autohide || (self.logical_size().0 < 560.0),
+                "collapsed": (self.settings.appearance.sidebar_collapsed || (self.logical_size().0 < 560.0)) && !self.settings.appearance.sidebar_autohide,
                 "flyout_open": self.flyout_visible,
                 "focus_mode": self.focus_mode,
                 "bookmarks_bar": self.settings.appearance.show_bookmarks_bar,
