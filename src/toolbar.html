@@ -315,13 +315,15 @@
   .tab.group-4 { --group-color: #5cb85c; }
   .tab.group-5 { --group-color: #4a90d9; }
   .tab.group-6 { --group-color: #9b6bd3; }
-  .tab.asleep:not(.active) .title, .tab.asleep:not(.active) .favicon { opacity: 0.52; }
-  .tab.asleep:not(.active)::after {
-    content: "zzz";
-    font-size: 9px;
-    opacity: 0.55;
-    margin-left: 4px;
-    letter-spacing: -0.5px;
+  .tab.asleep:not(.active) .title { opacity: 0.52; }
+  .tab.asleep:not(.active) .favicon {
+    filter: grayscale(100%);
+    opacity: 0.45;
+    transition: filter 200ms ease, opacity 200ms ease;
+  }
+  .tab.asleep:hover .favicon {
+    filter: grayscale(30%);
+    opacity: 0.8;
   }
   .tab.pinned { flex: 0 0 42px; min-width: 42px; max-width: 48px; padding: 0 10px; justify-content: center; }
   body:not(.vertical) .tab.pinned .title, body:not(.vertical) .tab.pinned .close { display: none; }
@@ -420,6 +422,78 @@
     transition: opacity 200ms;
   }
 
+  /* Tab sound indicator and muting button */
+  .tab .sound {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    padding: 1px;
+    margin-right: 3px;
+    color: var(--subtext-color);
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    flex-shrink: 0;
+    transition: color 120ms ease, background 120ms ease, transform 120ms ease;
+  }
+  .tab .sound:hover {
+    background: var(--hover-bg);
+    color: var(--fg-color);
+    transform: scale(1.1);
+  }
+  .tab.playing-audio .sound,
+  .tab.muted .sound {
+    display: inline-flex;
+  }
+  .tab.muted .sound {
+    color: #e62e3d;
+  }
+  .tab.playing-audio:not(.muted) .sound {
+    color: var(--accent-color);
+  }
+  .tab .sound svg {
+    width: 13px;
+    height: 13px;
+    display: block;
+  }
+  .tab.pinned .sound {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 14px;
+    height: 14px;
+    background: var(--bg-color);
+    border-radius: 50%;
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+    margin: 0;
+    padding: 1px;
+  }
+  .tab.pinned .sound svg {
+    width: 9px;
+    height: 9px;
+  }
+  body.vertical.collapsed #tabs .tab .sound,
+  body.autohide:not(.flyout) #side .tab .sound {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 14px;
+    height: 14px;
+    background: var(--bg-color);
+    border-radius: 50%;
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+    margin: 0;
+    padding: 1px;
+  }
+  body.vertical.collapsed #tabs .tab .sound svg,
+  body.autohide:not(.flyout) #side .tab .sound svg {
+    width: 9px;
+    height: 9px;
+  }
+
   .tab .close {
     position: absolute;
     right: 6px;
@@ -495,21 +569,7 @@
   /* ── Flyout (the sliding panel itself, a separate webview over the page) ── */
   body.flyout { background: transparent; }
   body.flyout #row, body.flyout .grip, body.flyout #sidebar-toggle { display: none !important; }
-  #pin {
-    display: none;
-    position: fixed;
-    left: 8px;
-    bottom: 8px;
-    height: 30px;
-    padding: 0 10px;
-    border-radius: var(--border-radius);
-    color: var(--subtext-color);
-    font-size: 12px;
-    z-index: 6;
-    transition: background-color var(--anim-duration), color var(--anim-duration);
-  }
-  body.flyout #pin { display: grid; }
-  #pin:hover { background: var(--hover-bg); color: var(--fg-color); }
+
 
   /* =========================================================================
    * Surface effects: theme gradient, ambient page glow and grain. They sit in #fx, behind the
@@ -791,9 +851,7 @@
     background: transparent !important;
     transform: none !important;
   }
-  #side #sidebar-toggle, #side #pin { position: static; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; }
-  #side #pin { display: none; }
-  body.flyout #side #pin { display: grid; }
+  #side #sidebar-toggle { position: static; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; }
   body.flyout #side #sidebar-toggle { display: none; }
 
   /* Collapsed: a narrow icon column. */
@@ -1033,12 +1091,7 @@
           <path class="chev" d="M12.5 5.5L10 8l2.5 2.5"/>
         </svg>
       </button>
-      <button id="pin" title="Keep the sidebar open (turn off auto-hide)">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="17" x2="12" y2="22"/>
-          <path d="M5 17h14v-2l-2-3V6a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v6l-2 3v2z"/>
-        </svg>
-      </button>
+
       <button class="btn" id="newtab" title="New tab (Shift+click: new tab, Shift+right-click: new private tab)">&#x2b;</button>
       <div class="spacer"></div>
       <button class="btn" id="menu-btn" title="Menu: private tab, extensions, history, downloads, settings and more">
@@ -1200,7 +1253,7 @@
   $("star").onclick = () => post({ cmd: "toggle_bookmark" });
   $("shield").onclick = () => post({ cmd: "toggle_site_adblock" });
   $("sidebar-toggle").onclick = () => toggleSidebarAnimated();
-  $("pin").onclick = () => post({ cmd: "toggle_sidebar_autohide" });
+
 
   // Auto-hide: hovering the 8px strip opens the panel (fast sensitive response).
   let peekTimer = null;
@@ -1310,7 +1363,7 @@
     el.className = "tab entering";
     el.dataset.id = t.id;
     el.draggable = true;
-    el.innerHTML = '<span class="favicon"></span><span class="title"></span><button class="close" title="Close tab (Ctrl+W)">&#x2715;</button>';
+    el.innerHTML = '<span class="favicon"></span><span class="title"></span><button class="sound" aria-label="Mute/unmute tab"></button><button class="close" title="Close tab (Ctrl+W)">&#x2715;</button>';
     el.ondragstart = (e) => {
       dragTabId = Number(el.dataset.id);
       e.dataTransfer.effectAllowed = "move";
@@ -1332,17 +1385,22 @@
     el.onmousedown = (e) => {
       const id = Number(el.dataset.id);
       if (e.button === 1) { post({ cmd: "close_tab", id }); e.preventDefault(); }
-      else if (e.button === 0 && !e.target.classList.contains("close")) {
+      else if (e.button === 0 && !e.target.closest(".close") && !e.target.closest(".sound")) {
         if (e.detail === 2 && !vertical) post({ cmd: "toggle_maximize" });
         else if (!el.classList.contains("active")) post({ cmd: "switch_tab", id });
       }
     };
     el.querySelector(".close").onclick = (e) => { e.stopPropagation(); post({ cmd: "close_tab", id: Number(el.dataset.id) }); };
+    el.querySelector(".sound").onclick = (e) => { e.stopPropagation(); post({ cmd: "toggle_mute_tab", id: Number(el.dataset.id) }); };
     // Right-click cycles colour group; Shift+Right-click pins/unpins the tab.
     el.oncontextmenu = (e) => {
       e.preventDefault();
       if (e.shiftKey) {
         post({ cmd: "pin_tab", id: Number(el.dataset.id) });
+        return;
+      }
+      if (e.altKey) {
+        post({ cmd: "toggle_mute_tab", id: Number(el.dataset.id) });
         return;
       }
       const g = (Number(el.dataset.group || 0) + 1) % 7;
@@ -1501,6 +1559,21 @@
       const titleEl = el.querySelector(".title");
       if (titleEl.textContent !== title) titleEl.textContent = title;
       setFavicon(el, t);
+      el.classList.toggle("playing-audio", !!t.playing_audio);
+      el.classList.toggle("muted", !!t.muted);
+      const soundBtn = el.querySelector(".sound");
+      if (soundBtn) {
+        if (t.muted) {
+          soundBtn.title = "Unmute tab (Ctrl+M)";
+          soundBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
+        } else if (t.playing_audio) {
+          soundBtn.title = "Mute tab (Ctrl+M)";
+          soundBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>';
+        } else {
+          soundBtn.title = "";
+          soundBtn.innerHTML = "";
+        }
+      }
       if (t.active) el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
     }
     for (const [id, el] of tabEls) {

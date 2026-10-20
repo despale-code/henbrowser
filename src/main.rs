@@ -34,6 +34,7 @@ use tao::window::{Window, WindowBuilder};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, FaviconChangedEventHandler,
+    IsDocumentPlayingAudioChangedEventHandler, IsMutedChangedEventHandler,
 };
 use windows::core::{Interface, BOOL};
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM};
@@ -119,6 +120,7 @@ pub(crate) enum UserEvent {
     SiteAction(SiteAction),
     Download(internal::Download),
     Favicon(u32, String),
+    TabAudioState { tab: u32, playing: bool, muted: bool },
     PageTone(u32, bool),
     PageAmbient(u32, Vec<[u8; 3]>),
     AmbientFallback(u32),
@@ -148,6 +150,7 @@ pub(crate) enum Shortcut {
     Pip,
     ToggleSidebar,
     ToggleFocusMode,
+    ToggleMute,
 }
 
 pub(crate) struct Paths {
@@ -285,6 +288,78 @@ fn _old_chrome_bg(css: &str) -> (u8, u8, u8, u8) {
         }
     }
     (242, 241, 240, 255)
+}
+
+pub(crate) fn install_audio_state(
+    controller: &ICoreWebView2Controller,
+    tab: u32,
+    muted: bool,
+    proxy: EventLoopProxy<UserEvent>,
+) {
+    let Ok(core8) =
+        (unsafe { controller.CoreWebView2() }).and_then(|c| c.cast::<ICoreWebView2_8>())
+    else {
+        return;
+    };
+
+    if muted {
+        let _ = unsafe { core8.SetIsMuted(true) };
+    }
+
+    let mut playing = BOOL(0);
+    let mut is_muted = BOOL(0);
+    let _ = unsafe { core8.IsDocumentPlayingAudio(&mut playing) };
+    let _ = unsafe { core8.IsMuted(&mut is_muted) };
+    if playing.as_bool() || is_muted.as_bool() {
+        let _ = proxy.send_event(UserEvent::TabAudioState {
+            tab,
+            playing: playing.as_bool(),
+            muted: is_muted.as_bool(),
+        });
+    }
+
+    let mut token_audio = 0i64;
+    let p1 = proxy.clone();
+    unsafe {
+        let _ = core8.add_IsDocumentPlayingAudioChanged(
+            &IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+                if let Some(c8) = sender.and_then(|s| s.cast::<ICoreWebView2_8>().ok()) {
+                    let mut playing = BOOL(0);
+                    let mut muted = BOOL(0);
+                    let _ = c8.IsDocumentPlayingAudio(&mut playing);
+                    let _ = c8.IsMuted(&mut muted);
+                    let _ = p1.send_event(UserEvent::TabAudioState {
+                        tab,
+                        playing: playing.as_bool(),
+                        muted: muted.as_bool(),
+                    });
+                }
+                Ok(())
+            })),
+            &mut token_audio,
+        );
+    }
+
+    let mut token_muted = 0i64;
+    unsafe {
+        let _ = core8.add_IsMutedChanged(
+            &IsMutedChangedEventHandler::create(Box::new(move |sender, _| {
+                if let Some(c8) = sender.and_then(|s| s.cast::<ICoreWebView2_8>().ok()) {
+                    let mut playing = BOOL(0);
+                    let mut muted = BOOL(0);
+                    let _ = c8.IsDocumentPlayingAudio(&mut playing);
+                    let _ = c8.IsMuted(&mut muted);
+                    let _ = proxy.send_event(UserEvent::TabAudioState {
+                        tab,
+                        playing: playing.as_bool(),
+                        muted: muted.as_bool(),
+                    });
+                }
+                Ok(())
+            })),
+            &mut token_muted,
+        );
+    }
 }
 
 pub(crate) fn install_favicon(
@@ -986,6 +1061,7 @@ fn shortcut_for(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut>
         (true, true, false) if vk == b'T' as u32 => Shortcut::ReopenClosedTab,
         (true, true, false) if vk == b'N' as u32 => Shortcut::NewPrivateTab,
         (true, false, false) if vk == b'W' as u32 => Shortcut::CloseTab,
+        (true, false, false) if vk == b'M' as u32 => Shortcut::ToggleMute,
         (true, false, false) if vk == b'L' as u32 => Shortcut::FocusAddress,
         (true, false, false) if vk == b'R' as u32 => Shortcut::Reload,
         (true, false, false) if vk == b'D' as u32 => Shortcut::Bookmark,

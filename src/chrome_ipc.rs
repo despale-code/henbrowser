@@ -6,7 +6,7 @@ use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::window::ResizeDirection;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{ClearBrowsingDataCompletedHandler, FocusChangedEventHandler};
-use windows::core::Interface;
+use windows::core::{Interface, BOOL};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use wry::MemoryUsageLevel;
@@ -118,6 +118,7 @@ pub(crate) enum ToolbarCmd {
     SetTabGroup { id: u32, group: u8 },
     SwitchToTab { id: u32 },
     DragWindow,
+    ToggleMuteTab { id: u32 },
     ResizeWindow { edge: String },
     ToggleMaximize,
     CloseWindow,
@@ -619,6 +620,23 @@ impl Browser {
         }
     }
 
+    pub(crate) fn toggle_mute_tab(&mut self, id: u32) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+            let mut new_muted = !tab.muted;
+            if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
+                if let Ok(c8) = core.cast::<ICoreWebView2_8>() {
+                    let mut muted = BOOL(0);
+                    if unsafe { c8.IsMuted(&mut muted) }.is_ok() {
+                        new_muted = !muted.as_bool();
+                        let _ = unsafe { c8.SetIsMuted(new_muted) };
+                    }
+                }
+            }
+            tab.muted = new_muted;
+            self.sync_toolbar();
+        }
+    }
+
     pub(crate) fn layout(&self) {
         let _ = self.toolbar.set_visible(!self.focus_mode);
         if !self.focus_mode {
@@ -695,6 +713,8 @@ impl Browser {
                 "sleeping": t.suspended || t.discarded,
                 "never_sleep": self.is_site_never_sleep(&t.url),
                 "private": t.private,
+                "playing_audio": t.playing_audio,
+                "muted": t.muted,
             })).collect::<Vec<_>>(),
             "bookmarks": self.bookmarks.all().iter().take(24).map(|b| json!({
                 "url": b.url,
@@ -1155,6 +1175,9 @@ impl Browser {
                             self.switch_to(i);
                         }
                     }
+                    ToolbarCmd::ToggleMuteTab { id } => {
+                        self.toggle_mute_tab(id);
+                    }
                     ToolbarCmd::Navigate { input } => {
                         self.hide_suggestions();
                         let url = resolve_input(&input, &self.settings.search_engine);
@@ -1582,6 +1605,12 @@ impl Browser {
                     self.layout();
                     self.sync_toolbar();
                 }
+                Shortcut::ToggleMute => {
+                    if let Some(tab) = self.tabs.get(self.active) {
+                        let id = tab.id;
+                        self.toggle_mute_tab(id);
+                    }
+                }
                 Shortcut::Escape => {
                     if self.focus_mode {
                         self.focus_mode = false;
@@ -1789,6 +1818,15 @@ impl Browser {
                 if let Some(i) = self.tab_index(id) {
                     self.tabs[i].favicon = uri;
                     self.sync_toolbar();
+                }
+            }
+            UserEvent::TabAudioState { tab, playing, muted } => {
+                if let Some(i) = self.tab_index(tab) {
+                    if self.tabs[i].playing_audio != playing || self.tabs[i].muted != muted {
+                        self.tabs[i].playing_audio = playing;
+                        self.tabs[i].muted = muted;
+                        self.sync_toolbar();
+                    }
                 }
             }
             UserEvent::PageTone(id, dark) => {

@@ -12,7 +12,7 @@ use wry::WebViewExtWindows;
 use wry::{NewWindowResponse, PageLoadEvent, WebView};
 
 use crate::{
-    adblock_filter, downloads, install_diagnostics, install_favicon, install_shortcuts, internal,
+    adblock_filter, downloads, install_audio_state, install_diagnostics, install_favicon, install_shortcuts, internal,
     internal_mode_init, profile_builder, serve_internal, settings, show_settings_page,
     theme_init_script, Browser, UserEvent, HOME, PRIVATE_START_URL,
 };
@@ -45,6 +45,8 @@ pub(crate) struct Tab {
     pub(crate) ambient: Vec<[u8; 3]>,
     /// InPrivate: nothing it visits is kept (history, session, cookies), and no extensions.
     pub(crate) private: bool,
+    pub(crate) playing_audio: bool,
+    pub(crate) muted: bool,
 }
 
 impl Browser {
@@ -89,6 +91,7 @@ impl Browser {
                 "icon": t.favicon,
                 "group": t.group,
                 "pinned": t.pinned,
+                "muted": t.muted,
             }));
             cur += 1;
         }
@@ -124,6 +127,8 @@ impl Browser {
             group: u8,
             #[serde(default)]
             pinned: bool,
+            #[serde(default)]
+            muted: bool,
         }
         #[derive(Deserialize)]
         struct Session {
@@ -158,6 +163,7 @@ impl Browser {
                     icon: String::new(),
                     group: s.groups.get(i).copied().unwrap_or(0),
                     pinned: s.pinned.get(i).copied().unwrap_or(false),
+                    muted: false,
                 })
                 .collect()
         };
@@ -180,6 +186,14 @@ impl Browser {
                 }
                 tab.group = item.group.min(6);
                 tab.pinned = item.pinned;
+                tab.muted = item.muted;
+                if item.muted {
+                    if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
+                        if let Ok(c8) = core.cast::<ICoreWebView2_8>() {
+                            let _ = unsafe { c8.SetIsMuted(true) };
+                        }
+                    }
+                }
             }
         }
         if !self.tabs.is_empty() {
@@ -380,6 +394,7 @@ impl Browser {
         install_shortcuts(&controller, self.proxy.clone(), true);
         install_diagnostics(&controller, id);
         install_favicon(&controller, id, self.proxy.clone());
+        install_audio_state(&controller, id, false, self.proxy.clone());
         downloads::install_downloads(&controller, self.proxy.clone(), self.settings.downloads.directory.clone());
         install_history_changed(&controller, self.proxy.clone());
         if self.settings.downloads.speed_limit_kbps > 0 {
@@ -412,6 +427,8 @@ impl Browser {
             tone: None,
             ambient: Vec::new(),
             private,
+            playing_audio: false,
+            muted: false,
         });
         if background {
             self.send_to_background(self.tabs.len() - 1);
@@ -486,6 +503,13 @@ impl Browser {
         let _ = tab.webview.set_memory_usage_level(MemoryUsageLevel::Normal);
         let _ = tab.webview.set_bounds(bounds);
         let _ = tab.webview.set_visible(true);
+        if tab.muted {
+            if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
+                if let Ok(c8) = core.cast::<ICoreWebView2_8>() {
+                    let _ = unsafe { c8.SetIsMuted(true) };
+                }
+            }
+        }
         if std::mem::take(&mut tab.suspended) {
             if let Ok(core) = unsafe { tab.webview.controller().CoreWebView2() } {
                 if let Ok(c3) = core.cast::<ICoreWebView2_3>() {
