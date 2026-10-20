@@ -637,6 +637,12 @@ impl Browser {
         if self.mode_css.contains('{') {
             theme.push_str(&format!("<style>{}</style>", self.mode_css));
         }
+        let noise_val = if self.settings.appearance.noise {
+            self.settings.appearance.noise_strength as f64 / 100.0
+        } else {
+            0.0
+        };
+        theme.push_str(&format!("<style>:root{{--fx-noise:{:.2};}}</style>", noise_val));
         let pair = |url: &str, title: &str| (url.to_owned(), title.to_owned());
         if let Ok(mut d) = self.start.lock() {
             d.theme = theme;

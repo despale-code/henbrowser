@@ -624,17 +624,16 @@
   @keyframes amb-c { to { transform: translate3d(-12vw, 8px, 0) scale(0.9, 1.15); } }
   @keyframes amb-d { to { transform: translate3d(30px, -12vh, 0) scale(1.1, 1.25); } }
 
-  /* Grain, like Zen: static fractal noise blended into whatever is under it. */
+  /* Grain, like Zen: procedural film grain over the chrome surfaces. */
   #fx-noise {
     position: fixed;
     inset: 0;
     z-index: 90;
     pointer-events: none;
-    transition: opacity 300ms var(--anim-smooth);
-    opacity: calc(var(--fx-noise) * 0.7);
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    background-size: 180px 180px;
+    transition: opacity 160ms var(--anim-smooth);
+    opacity: calc(var(--fx-noise, 0) * 0.85);
+    background-repeat: repeat;
+    background-size: 160px 160px;
   }
   body.flyout #fx-noise { display: block !important; }
 
@@ -1332,6 +1331,31 @@
   // ── Surface effects ──
   const fxRoot = document.documentElement.style;
   let ambientSig = "";
+  function initNoiseTexture() {
+    try {
+      const size = 160;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      const imgData = ctx.createImageData(size, size);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const isLight = Math.random() > 0.5;
+        const v = isLight ? 255 : 0;
+        data[i] = v;
+        data[i + 1] = v;
+        data[i + 2] = v;
+        data[i + 3] = Math.floor(Math.random() * 45) + 15;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const url = canvas.toDataURL("image/png");
+      const el = $("fx-noise");
+      if (el) el.style.backgroundImage = `url("${url}")`;
+    } catch (_) {}
+  }
+  initNoiseTexture();
+
   function applyFx(fx, colors) {
     fx = fx || {};
     const level = (on, v) => (on ? Math.max(0, Math.min(100, Number(v) || 0)) / 100 : 0);
