@@ -383,6 +383,29 @@ impl Browser {
         }
         self.active = index;
         self.bring_to_foreground(index);
+
+        // Keep adjacent tabs (top and bottom of active tab) warm and active so switching is instant and fluid
+        let len = self.tabs.len();
+        if len > 1 {
+            let prev = if index == 0 { len - 1 } else { index - 1 };
+            let next = (index + 1) % len;
+            for &adj in &[prev, next] {
+                if adj != index {
+                    if let Some(t) = self.tabs.get_mut(adj) {
+                        t.hidden_since = None;
+                        let _ = t.webview.set_memory_usage_level(MemoryUsageLevel::Normal);
+                        if std::mem::take(&mut t.suspended) {
+                            if let Ok(core) = unsafe { t.webview.controller().CoreWebView2() } {
+                                if let Ok(c3) = core.cast::<ICoreWebView2_3>() {
+                                    let _ = unsafe { c3.Resume() };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         self.sync_toolbar();
         self.refresh_chrome_theme();
         self.measure_tone();

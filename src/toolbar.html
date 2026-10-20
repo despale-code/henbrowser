@@ -487,17 +487,18 @@
   #sidebar-toggle:hover { background: var(--hover-bg); color: var(--fg-color); }
   body.vertical.collapsed #sidebar-toggle { transform: rotate(180deg); }
 
-  /* ── Auto-hide: a thin strip; hovering it slides the tab panel out over the page ── */
+  /* ── Auto-hide: collapsed mode strip; hovering or ALT+S slides/opens full sidebar ── */
   body.vertical.autohide #tabs {
-    width: 6px;
-    padding: 0;
-    overflow: hidden;
-    cursor: default;
-    transition: background-color 200ms;
+    width: var(--sidebar-collapsed-w);
   }
-  body.vertical.autohide #tabs > * { visibility: hidden; }
-  body.vertical.autohide #tabs:hover { background: var(--accent-color); }
-  body.vertical.autohide #sidebar-toggle { display: none; }
+  body.vertical.autohide #tabs .tab .title,
+  body.vertical.autohide #tabs .tab .close {
+    display: none;
+  }
+  body.vertical.autohide #tabs .tab {
+    padding: 0;
+    justify-content: center;
+  }
 
   /* ── Flyout (the sliding panel itself, a separate webview over the page) ── */
   body.flyout { background: transparent; }
@@ -842,9 +843,47 @@
   }
   body.flyout.open #flyout-strip { display: none; }
 
-  body.autohide:not(.flyout) #side { width: 16px; padding: 0; overflow: hidden; }
-  body.autohide:not(.flyout) #side > * { visibility: hidden; }
-  body.autohide:not(.flyout) #side:hover { background: color-mix(in srgb, var(--accent-color) 45%, transparent); }
+  body.autohide:not(.flyout) #side {
+    width: var(--sidebar-collapsed-w);
+  }
+  body.autohide:not(.flyout) #side #field,
+  body.autohide:not(.flyout) #side #exts,
+  body.autohide:not(.flyout) #side .spacer {
+    display: none;
+  }
+  body.autohide:not(.flyout) #side-top,
+  body.autohide:not(.flyout) #side-bottom {
+    flex-direction: column;
+    height: auto;
+  }
+  body.autohide:not(.flyout) #side .tab .title,
+  body.autohide:not(.flyout) #side .tab .close {
+    display: none;
+  }
+  body.autohide:not(.flyout) #side .tab {
+    padding: 0;
+    justify-content: center;
+  }
+  body.autohide:not(.flyout) #sidebar-toggle .chev {
+    transform: scaleX(-1);
+  }
+
+  /* ── Focus Mode (Alt+Z): hides all chrome, website is fullscreen ── */
+  body.focus-mode #side,
+  body.focus-mode #row,
+  body.focus-mode #bmbar,
+  body.focus-mode .grip,
+  body.focus-mode #win-border,
+  body.focus-mode #page-edge,
+  body.focus-mode #flyout-strip,
+  body.focus-mode #tabs {
+    display: none !important;
+  }
+
+  /* ── Animating Sidebar: disable CSS transition during live RAF bounds adjustments ── */
+  body.animating-sidebar #side {
+    transition: none !important;
+  }
   body.flyout #side {
     left: 0;
     top: 0;
@@ -1123,9 +1162,66 @@
     resizer.addEventListener("pointerup", up);
     resizer.addEventListener("pointercancel", up);
   });
+  let sidebarAnimFrame = 0;
+  function toggleSidebarAnimated() {
+    if (autohide) {
+      if (flyout) {
+        post({ cmd: "sidebar_peek", show: false });
+      } else {
+        post({ cmd: "sidebar_peek", show: true });
+      }
+      return;
+    }
+    if (sidebarAnimFrame) {
+      cancelAnimationFrame(sidebarAnimFrame);
+      sidebarAnimFrame = 0;
+    }
+
+    const side = $("side");
+    const isCollapsed = document.body.classList.contains("collapsed");
+    const willBeCollapsed = !isCollapsed;
+
+    const collapsedW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-collapsed-w")) || 56;
+    const expandedW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w")) || 240;
+
+    const startW = isCollapsed ? collapsedW : (side ? side.offsetWidth : expandedW);
+    const targetW = willBeCollapsed ? collapsedW : expandedW;
+
+    document.body.classList.add("animating-sidebar");
+    if (willBeCollapsed) {
+      document.body.classList.add("collapsed");
+    } else {
+      document.body.classList.remove("collapsed");
+    }
+
+    const startTime = performance.now();
+    const duration = 240;
+
+    function step(now) {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const currentW = Math.round(startW + (targetW - startW) * ease);
+
+      if (side) side.style.width = currentW + "px";
+      post({ cmd: "sidebar_width_anim", w: currentW, collapsed: willBeCollapsed, done: false });
+
+      if (progress < 1) {
+        sidebarAnimFrame = requestAnimationFrame(step);
+      } else {
+        sidebarAnimFrame = 0;
+        if (side) side.style.width = "";
+        document.body.classList.remove("animating-sidebar");
+        post({ cmd: "sidebar_width_anim", w: targetW, collapsed: willBeCollapsed, done: true });
+      }
+    }
+
+    sidebarAnimFrame = requestAnimationFrame(step);
+  }
+
   $("star").onclick = () => post({ cmd: "toggle_bookmark" });
   $("shield").onclick = () => post({ cmd: "toggle_site_adblock" });
-  $("sidebar-toggle").onclick = () => post({ cmd: "toggle_sidebar" });
+  $("sidebar-toggle").onclick = () => toggleSidebarAnimated();
   $("pin").onclick = () => post({ cmd: "toggle_sidebar_autohide" });
 
   // Auto-hide: hovering the strip opens the panel (fast sensitive response).
@@ -1431,7 +1527,7 @@
       const titleEl = el.querySelector(".title");
       if (titleEl.textContent !== title) titleEl.textContent = title;
       setFavicon(el, t);
-      if (t.active && !vertical) el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+      if (t.active) el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
     }
     for (const [id, el] of tabEls) {
       if (seen.has(id)) continue;
@@ -1451,6 +1547,7 @@
   let lastBlocked = 0;
 
   window.hb = {
+    toggleSidebar: toggleSidebarAnimated,
     render(s) {
       const L = s.layout || {};
       vertical = flyout || !!L.vertical;
@@ -1458,6 +1555,7 @@
       document.body.classList.toggle("vertical", vertical);
       document.body.classList.toggle("autohide", !flyout && autohide);
       document.body.classList.toggle("collapsed", !flyout && !!L.collapsed);
+      document.body.classList.toggle("focus-mode", !!L.focus_mode);
       document.body.classList.toggle("bmbar", !flyout && !!L.bookmarks_bar);
       document.body.classList.toggle("no-anim", L.animations === false);
       applyFx(s.fx, s.ambient);

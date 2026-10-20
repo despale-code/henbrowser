@@ -146,6 +146,8 @@ pub(crate) enum Shortcut {
     TabSearch,
     Reader,
     Pip,
+    ToggleSidebar,
+    ToggleFocusMode,
 }
 
 pub(crate) struct Paths {
@@ -200,6 +202,8 @@ pub(crate) struct Browser {
     pub(crate) update_info: Option<updates::UpdateInfo>,
     pub(crate) update_checking: bool,
     pub(crate) update_error: Option<String>,
+    pub(crate) focus_mode: bool,
+    pub(crate) anim_sidebar_w: Option<f64>,
 }
 
 fn config_dir() -> PathBuf {
@@ -997,6 +1001,10 @@ fn shortcut_for(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut>
         (true, true, false) if key(VK_TAB) => Shortcut::PrevTab,
         (false, false, true) if key(VK_LEFT) => Shortcut::Back,
         (false, false, true) if key(VK_RIGHT) => Shortcut::Forward,
+        (false, false, true) if key(VK_UP) => Shortcut::PrevTab,
+        (false, false, true) if key(VK_DOWN) => Shortcut::NextTab,
+        (false, false, true) if vk == b'S' as u32 => Shortcut::ToggleSidebar,
+        (false, false, true) if vk == b'Z' as u32 => Shortcut::ToggleFocusMode,
         (false, false, false) if key(VK_F5) => Shortcut::Reload,
         (false, false, false) if key(VK_ESCAPE) => Shortcut::Escape,
         _ => return None,
@@ -1657,6 +1665,8 @@ fn main() -> anyhow::Result<()> {
         update_info: None,
         update_checking: false,
         update_error: None,
+        focus_mode: false,
+        anim_sidebar_w: None,
     };
     browser.build_suggest();
     if browser.settings.updates.auto_check {

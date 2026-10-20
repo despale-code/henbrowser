@@ -95,6 +95,8 @@ pub(crate) enum ToolbarCmd {
     NewPrivateTab,
     /// Dragging the sidebar's right edge; `done` on release (then it is saved).
     SidebarWidth { w: f64, #[serde(default)] done: bool },
+    /// Animated sidebar collapsing/expanding with live website bounds adjustment.
+    SidebarWidthAnim { w: f64, collapsed: bool, done: bool },
     RetryDownload { id: u64 },
     /// A click on a running download's card: open the file as soon as it finishes (again: don't).
     ToggleOpenWhenDone { id: u64 },
@@ -131,10 +133,22 @@ impl Browser {
     /// Where the page starts from the left: the window border plus the sidebar (which holds all
     /// of the browser's controls; there is no top bar).
     pub(crate) fn sidebar_w(&self) -> f64 {
+        if self.focus_mode {
+            return 0.0;
+        }
+        if let Some(w) = self.anim_sidebar_w {
+            return WIN_BORDER + w;
+        }
         let a = &self.settings.appearance;
         WIN_BORDER
             + match a.sidebar_collapsed {
-                _ if a.sidebar_autohide => 0.0,
+                _ if a.sidebar_autohide => {
+                    if self.flyout_visible {
+                        self.sidebar_width()
+                    } else {
+                        SIDEBAR_COLLAPSED_W
+                    }
+                }
                 true => SIDEBAR_COLLAPSED_W,
                 false => self.sidebar_width(),
             }
@@ -156,6 +170,12 @@ impl Browser {
 
     pub(crate) fn content_rect(&self) -> Rect {
         let (w, h) = self.logical_size();
+        if self.focus_mode {
+            return Rect {
+                position: LogicalPosition::new(0.0, 0.0).into(),
+                size: LogicalSize::new(w.max(1.0), h.max(1.0)).into(),
+            };
+        }
         let left = self.sidebar_w();
         let top = self.top_chrome_h();
         let bottom = WIN_BORDER + if self.shelf_visible { SHELF_H } else { 0.0 };
@@ -600,8 +620,11 @@ impl Browser {
     }
 
     pub(crate) fn layout(&self) {
-        let _ = self.toolbar.set_bounds(self.toolbar_rect());
-        self.keep_toolbar_behind();
+        let _ = self.toolbar.set_visible(!self.focus_mode);
+        if !self.focus_mode {
+            let _ = self.toolbar.set_bounds(self.toolbar_rect());
+            self.keep_toolbar_behind();
+        }
         if let Some(f) = &self.flyout {
             if self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide {
                 let bounds = if self.flyout_visible {
@@ -687,6 +710,7 @@ impl Browser {
                 "vertical": self.settings.appearance.vertical_tabs,
                 "autohide": self.settings.appearance.sidebar_autohide,
                 "collapsed": self.settings.appearance.sidebar_collapsed,
+                "focus_mode": self.focus_mode,
                 "bookmarks_bar": self.settings.appearance.show_bookmarks_bar,
                 "sidebar": self.sidebar_w(),
                 "sidebar_width": self.sidebar_width(),
@@ -1025,6 +1049,19 @@ impl Browser {
                         self.layout();
                         if done {
                             self.save_settings();
+                            self.sync_toolbar();
+                        }
+                    }
+                    ToolbarCmd::SidebarWidthAnim { w, collapsed, done } => {
+                        if done {
+                            self.anim_sidebar_w = None;
+                            self.settings.appearance.sidebar_collapsed = collapsed;
+                            self.save_settings();
+                        } else {
+                            self.anim_sidebar_w = Some(w);
+                        }
+                        self.layout();
+                        if done {
                             self.sync_toolbar();
                         }
                     }
@@ -1535,7 +1572,30 @@ impl Browser {
                     let i = if i == 8 { self.tabs.len() - 1 } else { i };
                     self.switch_to(i);
                 }
-                Shortcut::Escape => self.close_popup(),
+                Shortcut::ToggleSidebar => {
+                    if self.settings.appearance.sidebar_autohide {
+                        let show = !self.flyout_visible;
+                        self.sidebar_peek(show);
+                    } else {
+                        let _ = self.toolbar.evaluate_script("window.hb && hb.toggleSidebar ? hb.toggleSidebar() : true");
+                    }
+                }
+                Shortcut::ToggleFocusMode => {
+                    self.focus_mode = !self.focus_mode;
+                    let _ = self.toolbar.set_visible(!self.focus_mode);
+                    self.layout();
+                    self.sync_toolbar();
+                }
+                Shortcut::Escape => {
+                    if self.focus_mode {
+                        self.focus_mode = false;
+                        let _ = self.toolbar.set_visible(true);
+                        self.layout();
+                        self.sync_toolbar();
+                    } else {
+                        self.close_popup();
+                    }
+                }
             },
             UserEvent::AdblockReady(engine) => {
                 *self.engine.borrow_mut() = Some(*engine);
