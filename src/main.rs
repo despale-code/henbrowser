@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use tao::platform::windows::WindowBuilderExtWindows;
+use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
 use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
@@ -1563,6 +1563,8 @@ fn main() -> anyhow::Result<()> {
         .with_decorations(false)
         .with_undecorated_shadow(false)
         .build(&event_loop)?;
+
+    chickenwm_core::sys::apply_acrylic_raw(window.hwnd() as *mut _, None);
 
     let mut web_context = WebContext::new(Some(paths.profile.clone()));
     let mut toolbar_context = (!browser_settings.memory.share_toolbar_process)
