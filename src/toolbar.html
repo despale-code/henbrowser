@@ -503,19 +503,6 @@
   /* ── Flyout (the sliding panel itself, a separate webview over the page) ── */
   body.flyout { background: transparent; }
   body.flyout #row, body.flyout .grip, body.flyout #sidebar-toggle { display: none !important; }
-  body.flyout #tabs {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: var(--sidebar-w);
-    border-top: 0;
-    border-right: 1px solid var(--border-color);
-    transform: translateX(-104%);
-    transition: transform 280ms var(--anim-bezier), background-color var(--theme-fade);
-  }
-  body.flyout.open #tabs { transform: none; }
-  body.flyout.open.closing #tabs { transform: translateX(-104%); transition-duration: 200ms; }
   #pin {
     display: none;
     position: fixed;
@@ -735,14 +722,7 @@
   }
   body.vertical #tabs { transition: width 320ms var(--anim-bezier), background-color var(--theme-fade) var(--anim-smooth); }
 
-  /* Flyout: slides and fades with a soft shadow. */
-  body.flyout #tabs {
-    opacity: 0;
-    box-shadow: 8px 0 28px var(--shadow-color);
-    transition: transform 320ms var(--anim-bezier), opacity 220ms var(--anim-smooth), background-color var(--theme-fade);
-  }
-  body.flyout.open #tabs { opacity: 1; }
-  body.flyout.open.closing #tabs { opacity: 0; }
+  /* Flyout: clean transparent container, #side slides in cleanly */
 
   /* ── One continuous chrome around the page ──
      The toolbar row and the vertical tab sidebar form a single L-shaped surface: same
@@ -756,16 +736,21 @@
     position: fixed;
     left: var(--content-left, 0px);
     top: var(--content-top, 82px);
-    right: 0;
-    bottom: 0;
+    right: var(--win-border, 3px);
+    bottom: var(--win-border, 3px);
     z-index: 3;
     pointer-events: none;
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-color) 70%, transparent),
                 0 2px 6px color-mix(in srgb, var(--shadow-color) 60%, transparent),
                 0 10px 32px color-mix(in srgb, var(--shadow-color) 45%, transparent);
-    transition: left 380ms var(--anim-bezier), top 380ms var(--anim-bezier);
+    transition: left 240ms var(--anim-bezier), top 240ms var(--anim-bezier);
   }
-  body.flyout #page-edge { display: none; }
+  body.animating-sidebar #page-edge,
+  body.resizing #page-edge,
+  body.flyout #page-edge {
+    transition: none !important;
+  }
+  body.flyout #page-edge { display: none !important; }
 
   /* Address bar: a soft accent glow when focused. */
   #field.focus {
@@ -884,20 +869,30 @@
   body.animating-sidebar #side {
     transition: none !important;
   }
-  body.flyout #side {
+  /* ── Proper Flyout Overlay: solid background, crisp shadow, no ghosting ── */
+  body.flyout #side,
+  body.fx.flyout #side {
+    position: fixed;
     left: 0;
     top: 0;
     bottom: 0;
-    box-shadow: 6px 0 32px var(--shadow-color);
+    width: var(--sidebar-w);
+    background: var(--bg-color) !important;
+    border-right: 1px solid var(--border-color);
+    box-shadow: 6px 0 28px rgba(0, 0, 0, 0.5);
     transform: translateX(-104%);
-    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background-color var(--theme-fade);
-    background:
-      radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--accent-color) calc(var(--fx-gradient) * 18%), transparent), transparent),
-      var(--sidebar-bg);
+    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 100;
   }
-  body.flyout.open #side { transform: none; }
-  body.flyout.open.closing #side { transform: translateX(-104%); transition-duration: 220ms; }
-  body.flyout.open.closing #tabs { transform: none !important; }
+  body.flyout.open #side { transform: translateX(0); }
+  body.flyout.closing #side { transform: translateX(-104%); transition-duration: 180ms; }
+
+  /* When flyout is open over the page, hide the resting collapsed background sidebar */
+  body.flyout-open:not(.flyout) #side {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
 
   /* The bookmarks bar runs along the top of the page, right of the sidebar. */
   body.bmbar #bmbar {
@@ -1145,10 +1140,12 @@
     document.body.classList.add("resizing");
     const border = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--win-border")) || 3;
     let last = 0, frame = 0;
-    const widthAt = (x) => Math.round(Math.min(520, Math.max(180, x - border)));
+    const maxAllowed = Math.max(180, window.innerWidth - border * 2 - 240);
+    const widthAt = (x) => Math.round(Math.min(maxAllowed, Math.min(520, Math.max(180, x - border))));
     const move = (ev) => {
       last = widthAt(ev.clientX);
       fxRoot.setProperty("--sidebar-w", last + "px");
+      fxRoot.setProperty("--content-left", (border + last) + "px");
       if (!frame) frame = requestAnimationFrame(() => { frame = 0; post({ cmd: "sidebar_width", w: last }); });
     };
     const up = () => {
@@ -1204,6 +1201,9 @@
       const currentW = Math.round(startW + (targetW - startW) * ease);
 
       if (side) side.style.width = currentW + "px";
+      const border = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--win-border")) || 3;
+      fxRoot.setProperty("--content-left", (border + currentW) + "px");
+      fxRoot.setProperty("--sidebar-w", currentW + "px");
       post({ cmd: "sidebar_width_anim", w: currentW, collapsed: willBeCollapsed, done: false });
 
       if (progress < 1) {
@@ -1212,6 +1212,8 @@
         sidebarAnimFrame = 0;
         if (side) side.style.width = "";
         document.body.classList.remove("animating-sidebar");
+        fxRoot.setProperty("--content-left", (border + targetW) + "px");
+        fxRoot.setProperty("--sidebar-w", targetW + "px");
         post({ cmd: "sidebar_width_anim", w: targetW, collapsed: willBeCollapsed, done: true });
       }
     }
@@ -1555,6 +1557,7 @@
       document.body.classList.toggle("vertical", vertical);
       document.body.classList.toggle("autohide", !flyout && autohide);
       document.body.classList.toggle("collapsed", !flyout && !!L.collapsed);
+      document.body.classList.toggle("flyout-open", !flyout && !!L.flyout_open);
       document.body.classList.toggle("focus-mode", !!L.focus_mode);
       document.body.classList.toggle("bmbar", !flyout && !!L.bookmarks_bar);
       document.body.classList.toggle("no-anim", L.animations === false);

@@ -140,17 +140,19 @@ impl Browser {
             return WIN_BORDER + w;
         }
         let a = &self.settings.appearance;
+        let (win_w, _) = self.logical_size();
+
+        // At small window sizes (< 560px), auto-collapse the sidebar to 56px icon strip
+        // so the website viewport doesn't get squeezed into an unusable column.
+        let auto_collapsed = win_w < 560.0;
+        let is_collapsed = a.sidebar_collapsed || a.sidebar_autohide || auto_collapsed;
+
         WIN_BORDER
-            + match a.sidebar_collapsed {
-                _ if a.sidebar_autohide => {
-                    if self.flyout_visible {
-                        self.sidebar_width()
-                    } else {
-                        SIDEBAR_COLLAPSED_W
-                    }
-                }
-                true => SIDEBAR_COLLAPSED_W,
-                false => self.sidebar_width(),
+            + if is_collapsed {
+                SIDEBAR_COLLAPSED_W
+            } else {
+                let max_sidebar = (win_w - WIN_BORDER * 2.0 - 260.0).max(SIDEBAR_COLLAPSED_W);
+                self.sidebar_width().min(max_sidebar)
             }
     }
 
@@ -397,10 +399,12 @@ impl Browser {
     }
 
     pub(crate) fn flyout_rect(&self) -> Rect {
-        let (_, h) = self.logical_size();
+        let (w, h) = self.logical_size();
+        let max_w = (w - WIN_BORDER * 2.0).max(SIDEBAR_COLLAPSED_W);
+        let flyout_w = self.sidebar_width().min(max_w);
         Rect {
             position: LogicalPosition::new(WIN_BORDER, WIN_BORDER).into(),
-            size: LogicalSize::new(self.sidebar_width(), (h - 2.0 * WIN_BORDER).max(1.0)).into(),
+            size: LogicalSize::new(flyout_w, (h - 2.0 * WIN_BORDER).max(1.0)).into(),
         }
     }
 
@@ -442,6 +446,7 @@ impl Browser {
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                     );
                 }
+                install_shortcuts(&w.controller(), self.proxy.clone(), false);
                 self.flyout = Some(w);
                 true
             }
@@ -458,25 +463,15 @@ impl Browser {
                 let _ = f.set_visible(false);
             }
             self.flyout_visible = false;
+            self.sync_toolbar();
             return;
         }
         if !show {
             if let Some(f) = &self.flyout {
-                let _ = f.set_bounds(self.flyout_strip_rect());
-                let hwnd = f.hwnd();
-                unsafe {
-                    let _ = SetWindowPos(
-                        HWND(hwnd.0 as _),
-                        Some(HWND_TOP),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    );
-                }
+                let _ = f.set_visible(false);
             }
             self.flyout_visible = false;
+            self.sync_toolbar();
             return;
         }
         if !self.ensure_flyout() {
@@ -626,15 +621,10 @@ impl Browser {
             self.keep_toolbar_behind();
         }
         if let Some(f) = &self.flyout {
-            if self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide {
-                let bounds = if self.flyout_visible {
-                    self.flyout_rect()
-                } else {
-                    self.flyout_strip_rect()
-                };
-                let _ = f.set_bounds(bounds);
+            if self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide && self.flyout_visible {
+                let _ = f.set_bounds(self.flyout_rect());
                 let _ = f.set_visible(true);
-            } else if !self.flyout_visible {
+            } else {
                 let _ = f.set_visible(false);
             }
         }
@@ -709,7 +699,8 @@ impl Browser {
             "layout": {
                 "vertical": self.settings.appearance.vertical_tabs,
                 "autohide": self.settings.appearance.sidebar_autohide,
-                "collapsed": self.settings.appearance.sidebar_collapsed,
+                "collapsed": self.settings.appearance.sidebar_collapsed || self.settings.appearance.sidebar_autohide || (self.logical_size().0 < 560.0),
+                "flyout_open": self.flyout_visible,
                 "focus_mode": self.focus_mode,
                 "bookmarks_bar": self.settings.appearance.show_bookmarks_bar,
                 "sidebar": self.sidebar_w(),
