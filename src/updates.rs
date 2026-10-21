@@ -14,7 +14,7 @@ pub const REPO_URL: &str = "https://github.com/despale-code/henbrowser";
 pub const SMART_GIT_URL: &str = "https://github.com/despale-code/henbrowser.git/info/refs?service=git-upload-pack";
 pub const RELEASES_API_URL: &str = "https://api.github.com/repos/despale-code/henbrowser/releases/latest";
 pub const COMMITS_API_URL: &str = "https://api.github.com/repos/despale-code/henbrowser/commits/main";
-pub const UPDATE_SCRIPT_URL: &str = "https://despale-code.github.io/chickenwm/update.ps1";
+pub const UPDATE_SCRIPT_URL: &str = "https://raw.githubusercontent.com/despale-code/chickenwm/main/docs/update.ps1";
 
 const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
