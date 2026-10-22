@@ -17,6 +17,7 @@ pub const COMMITS_API_URL: &str = "https://api.github.com/repos/despale-code/hen
 pub const UPDATE_SCRIPT_URL: &str = "https://raw.githubusercontent.com/despale-code/chickenwm/main/docs/update.ps1";
 
 const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UpdateInfo {
@@ -53,10 +54,15 @@ pub fn get_installed_commit() -> Option<String> {
     }
 
     // 2. Try git rev-parse HEAD if running in a dev checkout
-    if let Ok(out) = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-    {
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+
+    let mut git_cmd = Command::new("git");
+    git_cmd.args(["rev-parse", "HEAD"]);
+    #[cfg(windows)]
+    git_cmd.creation_flags(CREATE_NO_WINDOW);
+
+    if let Ok(out) = git_cmd.output() {
         if out.status.success() {
             let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -100,7 +106,11 @@ pub fn parse_git_refs_main(text: &str) -> Option<String> {
 
 /// Runs curl.exe with timeout and custom headers to fetch text from a URL.
 fn fetch_text(url: &str) -> Result<String, String> {
-    let out = Command::new("curl.exe")
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+
+    let mut curl_cmd = Command::new("curl.exe");
+    curl_cmd
         .args([
             "-sSL",
             "--fail",
@@ -111,7 +121,12 @@ fn fetch_text(url: &str) -> Result<String, String> {
             "-H",
             "Accept: application/vnd.github+json",
         ])
-        .arg(url)
+        .arg(url);
+
+    #[cfg(windows)]
+    curl_cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let out = curl_cmd
         .output()
         .map_err(|e| format!("Failed to execute curl: {e}"))?;
 
