@@ -96,3 +96,55 @@
     color: var(--accent-fg) !important;
     font-weight: normal !important;
 }
+
+/* ==========================================================================
+   macOS WINDOW BORDERS (SHADOWLESS DUAL-RIM)
+   Shared Geometry: requires border-radius to curve the box-shadow stroke correctly
+   ========================================================================== */
+.mac-border-base {
+  border-radius: 12px;
+}
+
+/* ==========================================================================
+   LIGHT MODE BORDERS
+   ========================================================================== */
+
+/* Light Mode — FOCUSED (Active) */
+.mac-border-light-focused {
+  box-shadow:
+    /* Outer perimeter stroke: crisp dark edge */
+    0 0 0 1px rgba(0, 0, 0, 0.18),
+    /* Inner top specular bevel: crisp white rim highlight */
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.75);
+}
+
+/* Light Mode — UNFOCUSED (Inactive) */
+.mac-border-light-unfocused {
+  box-shadow:
+    /* Outer perimeter stroke: softened, lower contrast */
+    0 0 0 1px rgba(0, 0, 0, 0.10),
+    /* Inner top specular bevel: dimmed rim highlight */
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.40);
+}
+
+/* ==========================================================================
+   DARK MODE BORDERS
+   ========================================================================== */
+
+/* Dark Mode — FOCUSED (Active) */
+.mac-border-dark-focused {
+  box-shadow:
+    /* Outer perimeter stroke: crisp light edge */
+    0 0 0 1px rgba(255, 255, 255, 0.22),
+    /* Inner top specular bevel: subtle ambient top glow */
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Dark Mode — UNFOCUSED (Inactive) */
+.mac-border-dark-unfocused {
+  box-shadow:
+    /* Outer perimeter stroke: dimmed edge */
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    /* Inner top specular bevel: near-transparent rim */
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+}

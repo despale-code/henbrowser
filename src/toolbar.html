@@ -56,6 +56,23 @@
     --sidebar-collapsed-w: 56px;
   }
 
+  /* macOS Window Borders (Shadowless Dual-Rim) */
+  .mac-border-base {
+    border-radius: 12px;
+  }
+  .mac-border-light-focused {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18), inset 0 1px 0 0 rgba(255, 255, 255, 0.75);
+  }
+  .mac-border-light-unfocused {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.10), inset 0 1px 0 0 rgba(255, 255, 255, 0.40);
+  }
+  .mac-border-dark-focused {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  }
+  .mac-border-dark-unfocused {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     height: 100%;
