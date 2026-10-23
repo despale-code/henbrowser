@@ -130,7 +130,7 @@ pub(crate) enum ToolbarCmd {
 impl Browser {
     pub(crate) fn logical_size(&self) -> (f64, f64) {
         let size = self.window.inner_size();
-        let scale = self.window.scale_factor();
+        let scale = self.scale();
         (size.width as f64 / scale, size.height as f64 / scale)
     }
 
@@ -744,6 +744,8 @@ impl Browser {
     }
 
     pub(crate) fn layout(&self) {
+        let wm_s = self.scale();
+        let _ = unsafe { self.toolbar.controller().SetZoomFactor(wm_s) };
         let _ = self.toolbar.set_visible(!self.focus_mode);
         if !self.focus_mode {
             let _ = self.toolbar.set_bounds(self.toolbar_rect());
@@ -751,6 +753,7 @@ impl Browser {
         }
         if let Some(f) = &self.flyout {
             if self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide && self.flyout_visible {
+                let _ = unsafe { f.controller().SetZoomFactor(wm_s) };
                 let _ = f.set_bounds(self.flyout_rect());
                 let _ = f.set_visible(true);
             } else {
@@ -758,13 +761,18 @@ impl Browser {
             }
         }
         if let (Some(s), true) = (&self.shelf, self.shelf_visible) {
+            let _ = unsafe { s.controller().SetZoomFactor(wm_s) };
             let _ = s.set_bounds(self.shelf_rect());
         }
         let content_bounds = self.content_rect();
         for tab in &self.tabs {
             let _ = tab.webview.set_bounds(content_bounds);
+            let site = crate::settings::site_of(&tab.url).unwrap_or_default();
+            let want = wm_s * self.settings.sites.get(&site).and_then(|s| s.zoom).unwrap_or(1.0);
+            let _ = unsafe { tab.webview.controller().SetZoomFactor(want) };
         }
         if let Some(popup) = &self.popup {
+            let _ = unsafe { popup.webview.controller().SetZoomFactor(wm_s) };
             let bounds = if popup.extension_id == "menu" {
                 self.menu_rect()
             } else {

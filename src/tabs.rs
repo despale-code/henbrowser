@@ -393,6 +393,10 @@ impl Browser {
                 crate::apply_network_conditions(&core, self.settings.downloads.speed_limit_kbps);
             }
         }
+        let wm_s = crate::query_wm_scale(&self.window);
+        let site = crate::settings::site_of(url).unwrap_or_default();
+        let want = wm_s * self.settings.sites.get(&site).and_then(|s| s.zoom).unwrap_or(1.0);
+        let _ = unsafe { controller.SetZoomFactor(want) };
         if !private && !self.extensions_loaded {
             self.extensions_loaded = true;
         }

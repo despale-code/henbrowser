@@ -221,6 +221,23 @@ fn config_dir() -> PathBuf {
         .join("chickenwm")
 }
 
+/// Queries the effective window manager scale factor (from `chickenwm.conf` monitor directive
+/// or active monitor DPI).
+pub(crate) fn query_wm_scale(window: &tao::window::Window) -> f64 {
+    if let Ok((_doc, cfg)) = chickenwm_core::config::load_or_init_config() {
+        for mon in &cfg.monitors {
+            if mon.scale > 0.1 && (mon.scale - 1.0).abs() > 0.01 {
+                return mon.scale as f64;
+            }
+        }
+    }
+    let os_scale = window.scale_factor();
+    if os_scale > 0.1 {
+        return os_scale;
+    }
+    1.0
+}
+
 pub(crate) fn profile_builder<'a>(
     web_context: &'a mut WebContext,
     memory: &MemorySettings,
@@ -1385,6 +1402,10 @@ impl Browser {
         }
     }
 
+    pub(crate) fn scale(&self) -> f64 {
+        query_wm_scale(&self.window)
+    }
+
     pub(crate) fn apply_site_settings(&self, index: usize) {
         let Some(tab) = self
             .tabs
@@ -1398,7 +1419,7 @@ impl Browser {
         let controller = tab.webview.controller();
         let mut current = 1.0;
         if unsafe { controller.ZoomFactor(&mut current) }.is_ok() {
-            let want = s.zoom.unwrap_or(1.0);
+            let want = self.scale() * s.zoom.unwrap_or(1.0);
             if (current - want).abs() > 0.001 {
                 let _ = unsafe { controller.SetZoomFactor(want) };
             }
@@ -1642,7 +1663,7 @@ fn main() -> anyhow::Result<()> {
     let mut toolbar_context = (!browser_settings.memory.share_toolbar_process)
         .then(|| WebContext::new(Some(root.join("ui"))));
     let toolbar_proxy = proxy.clone();
-    let scale = window.scale_factor();
+    let scale = query_wm_scale(&window);
     let width = window.inner_size().width as f64 / scale;
     let toolbar_builder = match toolbar_context.as_mut() {
         Some(ctx) => WebViewBuilder::new_with_web_context(ctx),
@@ -1660,7 +1681,10 @@ fn main() -> anyhow::Result<()> {
         })
         .build_as_child(&window)
     {
-        Ok(t) => t,
+        Ok(t) => {
+            let _ = unsafe { t.controller().SetZoomFactor(scale) };
+            t
+        }
         Err(e) => {
             tracing::error!("failed to create toolbar webview: {e}");
             if focus_existing_instance() {
