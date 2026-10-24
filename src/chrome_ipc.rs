@@ -744,8 +744,14 @@ impl Browser {
     }
 
     pub(crate) fn layout(&self) {
+        let set_zoom = |ctrl: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller, want: f64| {
+            let mut cur = 0.0f64;
+            if unsafe { ctrl.ZoomFactor(&mut cur) }.is_err() || (cur - want).abs() > 0.001 {
+                let _ = unsafe { ctrl.SetZoomFactor(want) };
+            }
+        };
         let wm_s = self.scale();
-        let _ = unsafe { self.toolbar.controller().SetZoomFactor(wm_s) };
+        set_zoom(&self.toolbar.controller(), wm_s);
         let _ = self.toolbar.set_visible(!self.focus_mode);
         if !self.focus_mode {
             let _ = self.toolbar.set_bounds(self.toolbar_rect());
@@ -753,7 +759,7 @@ impl Browser {
         }
         if let Some(f) = &self.flyout {
             if self.settings.appearance.vertical_tabs && self.settings.appearance.sidebar_autohide && self.flyout_visible {
-                let _ = unsafe { f.controller().SetZoomFactor(wm_s) };
+                set_zoom(&f.controller(), wm_s);
                 let _ = f.set_bounds(self.flyout_rect());
                 let _ = f.set_visible(true);
             } else {
@@ -761,18 +767,20 @@ impl Browser {
             }
         }
         if let (Some(s), true) = (&self.shelf, self.shelf_visible) {
-            let _ = unsafe { s.controller().SetZoomFactor(wm_s) };
+            set_zoom(&s.controller(), wm_s);
             let _ = s.set_bounds(self.shelf_rect());
         }
         let content_bounds = self.content_rect();
-        for tab in &self.tabs {
-            let _ = tab.webview.set_bounds(content_bounds);
-            let site = crate::settings::site_of(&tab.url).unwrap_or_default();
-            let want = wm_s * self.settings.sites.get(&site).and_then(|s| s.zoom).unwrap_or(1.0);
-            let _ = unsafe { tab.webview.controller().SetZoomFactor(want) };
+        if self.page_switch_anim.is_none() {
+            if let Some(tab) = self.tabs.get(self.active) {
+                let _ = tab.webview.set_bounds(content_bounds);
+                let site = crate::settings::site_of(&tab.url).unwrap_or_default();
+                let want = wm_s * self.settings.sites.get(&site).and_then(|s| s.zoom).unwrap_or(1.0);
+                set_zoom(&tab.webview.controller(), want);
+            }
         }
         if let Some(popup) = &self.popup {
-            let _ = unsafe { popup.webview.controller().SetZoomFactor(wm_s) };
+            set_zoom(&popup.webview.controller(), wm_s);
             let bounds = if popup.extension_id == "menu" {
                 self.menu_rect()
             } else {
@@ -1905,6 +1913,11 @@ impl Browser {
                 self.refresh_extensions();
             }
             UserEvent::ThemeConfigChanged => {
+                let prev_scale = self.scale();
+                crate::refresh_cached_wm_scale();
+                if (self.scale() - prev_scale).abs() > 0.001 {
+                    self.layout();
+                }
                 if let Ok((_, cfg)) = chickenwm_core::config::load_or_init_config() {
                     if cfg.theme != self.system_theme {
                         self.system_theme = cfg.theme;

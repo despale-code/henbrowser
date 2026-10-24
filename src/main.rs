@@ -221,15 +221,32 @@ fn config_dir() -> PathBuf {
         .join("chickenwm")
 }
 
-/// Queries the effective window manager scale factor (from `chickenwm.conf` monitor directive
-/// or active monitor DPI).
-pub(crate) fn query_wm_scale(window: &tao::window::Window) -> f64 {
+static CACHED_WM_SCALE_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+pub(crate) fn refresh_cached_wm_scale() {
+    let mut found = 0.0f64;
     if let Ok((_doc, cfg)) = chickenwm_core::config::load_or_init_config() {
         for mon in &cfg.monitors {
             if mon.scale > 0.1 && (mon.scale - 1.0).abs() > 0.01 {
-                return mon.scale as f64;
+                found = mon.scale as f64;
+                break;
             }
         }
+    }
+    CACHED_WM_SCALE_BITS.store(found.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Queries the effective window manager scale factor (from `chickenwm.conf` monitor directive
+/// or active monitor DPI) without hitting disk on every resize event.
+pub(crate) fn query_wm_scale(window: &tao::window::Window) -> f64 {
+    let mut bits = CACHED_WM_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed);
+    if bits == u64::MAX {
+        refresh_cached_wm_scale();
+        bits = CACHED_WM_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed);
+    }
+    let cfg_scale = f64::from_bits(bits);
+    if cfg_scale > 0.1 {
+        return cfg_scale;
     }
     let os_scale = window.scale_factor();
     if os_scale > 0.1 {
