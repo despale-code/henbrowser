@@ -327,7 +327,7 @@ pub(crate) fn install_downloads(
                                 &query_uri,
                                 &webview2_com::GetCookiesCompletedHandler::create(Box::new(
                                     move |_, cookie_list| {
-                                        let mut cookie_str = collect_cookie_list(cookie_list.as_ref());
+                                        let cookie_str = collect_cookie_list(cookie_list.as_ref());
                                         // For Google Drive redirects (`googleusercontent.com` / `drive.usercontent.google.com`),
                                         // also merge cookies from `https://drive.google.com`.
                                         let ul = url_cb.to_ascii_lowercase();
