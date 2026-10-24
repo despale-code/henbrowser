@@ -134,10 +134,20 @@ fn resolve_downloader_exe() -> std::path::PathBuf {
     std::path::PathBuf::from("chickenwm-downloader.exe")
 }
 
-/// Opens or focuses the standalone `chickenwm-downloader` app.
+/// Opens or toggles the `chickenwm-downloader` service panel.
 pub(crate) fn open_downloader_window() {
-    let exe = resolve_downloader_exe();
-    chickenwm_core::elevation::shell_open_unelevated(&exe, None, None);
+    std::thread::spawn(|| {
+        if chickenwm_core::ipc::send_ipc_command_blocking(
+            chickenwm_core::ipc::PIPE_NAME_DOWNLOADER,
+            &chickenwm_core::ipc::IpcCommand::ToggleDownloaderCenter,
+        )
+        .is_ok()
+        {
+            return;
+        }
+        let exe = resolve_downloader_exe();
+        chickenwm_core::elevation::shell_open_unelevated(&exe, Some("--toggle"), None);
+    });
 }
 
 /// Redirects a browser download or magnet/torrent request to `chickenwm-downloader`.
@@ -146,6 +156,19 @@ pub(crate) fn redirect_to_downloader(
     filename: Option<&str>,
     save_dir: Option<&str>,
     is_torrent: bool,
+) {
+    redirect_to_downloader_with_context(url, filename, save_dir, is_torrent, None, None, None);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn redirect_to_downloader_with_context(
+    url: &str,
+    filename: Option<&str>,
+    save_dir: Option<&str>,
+    is_torrent: bool,
+    cookies: Option<String>,
+    referer: Option<String>,
+    user_agent: Option<String>,
 ) {
     let url_owned = url.to_string();
     let fname_owned = filename.map(str::to_string);
@@ -158,27 +181,23 @@ pub(crate) fn redirect_to_downloader(
             save_dir: dir_owned.clone(),
             is_torrent,
             prompt_location: true,
+            cookies,
+            referer,
+            user_agent,
         };
-        if let Ok(mut encoded) = serde_json::to_vec(&cmd) {
-            encoded.push(b'\n');
-            use std::fs::OpenOptions;
-            use std::io::Write;
-            if let Ok(mut pipe) = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(chickenwm_core::ipc::PIPE_NAME_DOWNLOADER)
-            {
-                if pipe.write_all(&encoded).is_ok() {
-                    let _ = pipe.flush();
-                    return;
-                }
-            }
+        if chickenwm_core::ipc::send_ipc_command_blocking(
+            chickenwm_core::ipc::PIPE_NAME_DOWNLOADER,
+            &cmd,
+        )
+        .is_ok()
+        {
+            return;
         }
 
-        // `chickenwm-downloader` is not running yet; launch it with the download arguments.
+        // `chickenwm-downloader` service is not running yet; launch it with the download arguments.
         use std::os::windows::process::CommandExt;
         use std::process::Stdio;
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
         let exe = resolve_downloader_exe();
         let mut proc = std::process::Command::new(&exe);
@@ -199,9 +218,34 @@ pub(crate) fn redirect_to_downloader(
         proc.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .creation_flags(CREATE_NEW_CONSOLE);
+            .creation_flags(CREATE_NO_WINDOW);
         let _ = proc.spawn();
     });
+}
+
+fn collect_cookie_list(list: Option<&ICoreWebView2CookieList>) -> String {
+    let Some(list) = list else {
+        return String::new();
+    };
+    let mut count = 0u32;
+    if unsafe { list.Count(&mut count) }.is_err() || count == 0 {
+        return String::new();
+    }
+    let mut pairs = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        if let Ok(cookie) = unsafe { list.GetValueAtIndex(i) } {
+            let mut n = windows::core::PWSTR::null();
+            let mut v = windows::core::PWSTR::null();
+            if unsafe { cookie.Name(&mut n) }.is_ok() && unsafe { cookie.Value(&mut v) }.is_ok() {
+                let name = webview2_com::take_pwstr(n);
+                let val = webview2_com::take_pwstr(v);
+                if !name.is_empty() {
+                    pairs.push(format!("{name}={val}"));
+                }
+            }
+        }
+    }
+    pairs.join("; ")
 }
 
 /// Tracks downloads for the shelf and `http://hen.downloads/`, in place of WebView2's own
@@ -217,6 +261,7 @@ pub(crate) fn install_downloads(
     else {
         return;
     };
+    let core_for_cb = core4.clone();
     let mut token = 0i64;
     unsafe {
         let _ = core4.add_DownloadStarting(
@@ -239,21 +284,119 @@ pub(crate) fn install_downloads(
                     .and_then(|n| n.to_str())
                     .map(str::to_string);
                 let u_lower = url.trim().to_ascii_lowercase();
-                let is_torrent = u_lower.starts_with("magnet:")
-                    || u_lower.split('?').next().unwrap_or("").ends_with(".torrent")
-                    || filename
-                        .as_deref()
-                        .is_some_and(|f| f.to_ascii_lowercase().ends_with(".torrent"));
 
-                // Cancel internal WebView2 download and redirect to `chickenwm-downloader`
-                let _ = op.Cancel();
-                redirect_to_downloader(
-                    &url,
-                    filename.as_deref(),
-                    (!download_dir.is_empty()).then_some(download_dir.as_str()),
-                    is_torrent,
-                );
-                if true {
+                // `blob:` and `data:` URLs only exist inside the WebView2 process memory and cannot
+                // be fetched by an external HTTP client; let WebView2 write them directly.
+                if !u_lower.starts_with("blob:") && !u_lower.starts_with("data:") {
+                    let is_torrent = u_lower.starts_with("magnet:")
+                        || u_lower.split('?').next().unwrap_or("").ends_with(".torrent")
+                        || filename
+                            .as_deref()
+                            .is_some_and(|f| f.to_ascii_lowercase().ends_with(".torrent"));
+
+                    let referer = {
+                        let mut p = windows::core::PWSTR::null();
+                        if core_for_cb.Source(&mut p).is_ok() {
+                            let s = webview2_com::take_pwstr(p);
+                            (!s.is_empty() && s != "about:blank").then_some(s)
+                        } else {
+                            None
+                        }
+                    };
+                    let ua = Some(crate::user_agent().to_string());
+                    let save_dir_opt = (!download_dir.is_empty()).then(|| download_dir.clone());
+
+                    // Cancel internal WebView2 download and redirect to `chickenwm-downloader`
+                    // along with browser cookies for authenticated / Google Drive downloads.
+                    let _ = op.Cancel();
+
+                    if let Ok(mgr) = core_for_cb
+                        .cast::<ICoreWebView2_2>()
+                        .and_then(|c2| c2.CookieManager())
+                    {
+                        let url_cb = url.clone();
+                        let fname_cb = filename.clone();
+                        let dir_cb = save_dir_opt.clone();
+                        let ref_cb = referer.clone();
+                        let ua_cb = ua.clone();
+                        let mgr_inner = mgr.clone();
+
+                        let query_uri = windows::core::HSTRING::from(&url);
+                        if mgr
+                            .GetCookies(
+                                &query_uri,
+                                &webview2_com::GetCookiesCompletedHandler::create(Box::new(
+                                    move |_, cookie_list| {
+                                        let mut cookie_str = collect_cookie_list(cookie_list.as_ref());
+                                        // For Google Drive redirects (`googleusercontent.com` / `drive.usercontent.google.com`),
+                                        // also merge cookies from `https://drive.google.com`.
+                                        let ul = url_cb.to_ascii_lowercase();
+                                        if ul.contains("google") || ul.contains("gdrive") {
+                                            let gdrive_uri = windows::core::HSTRING::from("https://drive.google.com");
+                                            let url_cb2 = url_cb.clone();
+                                            let fname_cb2 = fname_cb.clone();
+                                            let dir_cb2 = dir_cb.clone();
+                                            let ref_cb2 = ref_cb.clone();
+                                            let ua_cb2 = ua_cb.clone();
+                                            let mut cookie_str2 = cookie_str.clone();
+                                            if mgr_inner
+                                                .GetCookies(
+                                                    &gdrive_uri,
+                                                    &webview2_com::GetCookiesCompletedHandler::create(Box::new(
+                                                        move |_, g_list| {
+                                                            let g_cookies = collect_cookie_list(g_list.as_ref());
+                                                            if !g_cookies.is_empty() {
+                                                                if !cookie_str2.is_empty() {
+                                                                    cookie_str2.push_str("; ");
+                                                                }
+                                                                cookie_str2.push_str(&g_cookies);
+                                                            }
+                                                            redirect_to_downloader_with_context(
+                                                                &url_cb2,
+                                                                fname_cb2.as_deref(),
+                                                                dir_cb2.as_deref(),
+                                                                is_torrent,
+                                                                (!cookie_str2.is_empty()).then_some(cookie_str2),
+                                                                ref_cb2,
+                                                                ua_cb2,
+                                                            );
+                                                            Ok(())
+                                                        },
+                                                    )),
+                                                )
+                                                .is_ok()
+                                            {
+                                                return Ok(());
+                                            }
+                                        }
+                                        redirect_to_downloader_with_context(
+                                            &url_cb,
+                                            fname_cb.as_deref(),
+                                            dir_cb.as_deref(),
+                                            is_torrent,
+                                            (!cookie_str.is_empty()).then_some(cookie_str),
+                                            ref_cb,
+                                            ua_cb,
+                                        );
+                                        Ok(())
+                                    },
+                                )),
+                            )
+                            .is_ok()
+                        {
+                            return Ok(());
+                        }
+                    }
+
+                    redirect_to_downloader_with_context(
+                        &url,
+                        filename.as_deref(),
+                        save_dir_opt.as_deref(),
+                        is_torrent,
+                        None,
+                        referer,
+                        ua,
+                    );
                     return Ok(());
                 }
                 let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
