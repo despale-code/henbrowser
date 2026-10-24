@@ -1258,7 +1258,7 @@ impl Browser {
                     }
                     ToolbarCmd::OpenDownloads => {
                         self.close_popup();
-                        self.open_internal("http://hen.downloads/");
+                        downloads::open_downloader_window();
                     }
                     ToolbarCmd::OpenBookmarks => {
                         self.close_popup();

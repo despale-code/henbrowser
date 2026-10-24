@@ -645,11 +645,17 @@ pub(crate) fn install_diagnostics(controller: &ICoreWebView2Controller, tab: u32
                 if let Some(args) = args {
                     let mut uri = windows::core::PWSTR::null();
                     args.Uri(&mut uri)?;
+                    let uri_str = webview2_com::take_pwstr(uri);
+                    if uri_str.trim().to_ascii_lowercase().starts_with("magnet:") {
+                        let _ = args.SetCancel(true);
+                        crate::downloads::redirect_to_downloader(&uri_str, None, None, true);
+                        return Ok(());
+                    }
                     let mut id = 0u64;
                     let _ = args.NavigationId(&mut id);
                     tracing::debug!(
                         "tab {tab}: navigation {id} starting {}",
-                        webview2_com::take_pwstr(uri)
+                        uri_str
                     );
                 }
                 Ok(())

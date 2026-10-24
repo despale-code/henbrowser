@@ -115,6 +115,95 @@ pub(crate) fn show_in_folder(path: &str) {
     shell_execute("open", "explorer.exe", Some(&format!("/select,\"{path}\"")));
 }
 
+fn resolve_downloader_exe() -> std::path::PathBuf {
+    if let Ok(mut exe) = std::env::current_exe() {
+        exe.set_file_name("chickenwm-downloader.exe");
+        if exe.exists() {
+            return exe;
+        }
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let candidate = std::path::PathBuf::from(local)
+            .join("Programs")
+            .join("ChickenWM")
+            .join("chickenwm-downloader.exe");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    std::path::PathBuf::from("chickenwm-downloader.exe")
+}
+
+/// Opens or focuses the standalone `chickenwm-downloader` app.
+pub(crate) fn open_downloader_window() {
+    let exe = resolve_downloader_exe();
+    chickenwm_core::elevation::shell_open_unelevated(&exe, None, None);
+}
+
+/// Redirects a browser download or magnet/torrent request to `chickenwm-downloader`.
+pub(crate) fn redirect_to_downloader(
+    url: &str,
+    filename: Option<&str>,
+    save_dir: Option<&str>,
+    is_torrent: bool,
+) {
+    let url_owned = url.to_string();
+    let fname_owned = filename.map(str::to_string);
+    let dir_owned = save_dir.map(str::to_string);
+
+    std::thread::spawn(move || {
+        let cmd = chickenwm_core::ipc::IpcCommand::AddDownload {
+            url: url_owned.clone(),
+            filename: fname_owned.clone(),
+            save_dir: dir_owned.clone(),
+            is_torrent,
+            prompt_location: true,
+        };
+        if let Ok(mut encoded) = serde_json::to_vec(&cmd) {
+            encoded.push(b'\n');
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            if let Ok(mut pipe) = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(chickenwm_core::ipc::PIPE_NAME_DOWNLOADER)
+            {
+                if pipe.write_all(&encoded).is_ok() {
+                    let _ = pipe.flush();
+                    return;
+                }
+            }
+        }
+
+        // `chickenwm-downloader` is not running yet; launch it with the download arguments.
+        use std::os::windows::process::CommandExt;
+        use std::process::Stdio;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+        let exe = resolve_downloader_exe();
+        let mut proc = std::process::Command::new(&exe);
+        proc.arg("--add-url").arg(&url_owned).arg("--prompt-location");
+        if let Some(ref f) = fname_owned {
+            if !f.is_empty() {
+                proc.arg("--filename").arg(f);
+            }
+        }
+        if let Some(ref d) = dir_owned {
+            if !d.is_empty() {
+                proc.arg("--save-dir").arg(d);
+            }
+        }
+        if is_torrent {
+            proc.arg("--torrent");
+        }
+        proc.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NEW_CONSOLE);
+        let _ = proc.spawn();
+    });
+}
+
 /// Tracks downloads for the shelf and `http://hen.downloads/`, in place of WebView2's own
 /// download flyout.
 pub(crate) fn install_downloads(
@@ -134,6 +223,39 @@ pub(crate) fn install_downloads(
             &DownloadStartingEventHandler::create(Box::new(move |_, args| {
                 let Some(args) = args else { return Ok(()) };
                 let op = args.DownloadOperation()?;
+                let _ = args.SetHandled(true);
+                let url = {
+                    let mut p = windows::core::PWSTR::null();
+                    op.Uri(&mut p)?;
+                    webview2_com::take_pwstr(p)
+                };
+                let result_path = {
+                    let mut p = windows::core::PWSTR::null();
+                    args.ResultFilePath(&mut p)?;
+                    webview2_com::take_pwstr(p)
+                };
+                let filename = std::path::Path::new(&result_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(str::to_string);
+                let u_lower = url.trim().to_ascii_lowercase();
+                let is_torrent = u_lower.starts_with("magnet:")
+                    || u_lower.split('?').next().unwrap_or("").ends_with(".torrent")
+                    || filename
+                        .as_deref()
+                        .is_some_and(|f| f.to_ascii_lowercase().ends_with(".torrent"));
+
+                // Cancel internal WebView2 download and redirect to `chickenwm-downloader`
+                let _ = op.Cancel();
+                redirect_to_downloader(
+                    &url,
+                    filename.as_deref(),
+                    (!download_dir.is_empty()).then_some(download_dir.as_str()),
+                    is_torrent,
+                );
+                if true {
+                    return Ok(());
+                }
                 let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
                 // The shelf shows it instead of the default flyout.
                 let _ = args.SetHandled(true);

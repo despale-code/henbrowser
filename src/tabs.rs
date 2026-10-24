@@ -353,6 +353,10 @@ impl Browser {
                 let _ = p_load.send_event(UserEvent::PageLoad { tab: id, url, started });
             })
             .with_new_window_req_handler(move |url, features| {
+                if url.trim().to_ascii_lowercase().starts_with("magnet:") {
+                    crate::downloads::redirect_to_downloader(&url, None, None, true);
+                    return NewWindowResponse::Deny;
+                }
                 if features.size.is_some() || features.position.is_some() {
                     return NewWindowResponse::Allow;
                 }
